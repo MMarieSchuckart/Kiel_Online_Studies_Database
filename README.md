@@ -7,9 +7,13 @@ Here, you can find experimental and analysis scripts for the following studies:
 # Redundant Signals Effect
 - replication of the RSE (Todd, 1912): shorter reaction times when responding to multisensory (here: audiovisual) compared to unisensory stimuli (here: visual and auditory)
 - 1 training block, 3 main blocks with 90 trials each
-- Experimental script (lab.js):
-- Analysis script (R): 
-
+- Experimental script (lab.js):<br> 
+- Analysis scripts (R):<br>  
+      - for the lab study:<br> 
+https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/RSE/Read_CSV_lab <br> 
+      - for the online study:<br> 
+https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/RSE/Read_SQLite_online <br> 
+<br> 
 # Sound Induced Flash Illusion (SIFI)
 - SIFI: Illusionary perception of a double flashe instead of a single one when a flash is presented together with two short beeps
 - replication of the SIFI under different levels of cognitive load, manipulated via n-back-tasks (Michail & Keil, 2018)
