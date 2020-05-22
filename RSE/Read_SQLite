@@ -1,0 +1,457 @@
+##### Read in RSQLite file from lab.js for the MultiRace study #####
+
+# script by Merle Schuckart, Feb 2020 version
+
+
+#Install & load packages: 
+
+# install packages 
+#require('pacman')
+#install.packages('RSQLite') 
+#install.packages('jsonlite') 
+#install.packages('stringr') 
+#install.packages('tidyverse')
+#install.packages('janitor')
+#install.packages("data.table")
+#install.packages("car")
+#install.packages("dplyr")
+
+
+# load packages  
+library("RSQLite")
+library("jsonlite")
+library("stringr")
+library("tidyverse")
+library("janitor")
+library("data.table")
+library("car")
+library("dplyr")
+
+
+#___________________________________________________________________________________________________________________________
+
+###### Part 1: Reading in the data and putting everything into nested lists
+
+### The first part of this in which I read in the SQLite 
+### file is actually by Felix Henninger (http://felixhenninger.com).
+
+
+### 1. Reading in the data
+
+
+# 1.1 Set working directory to the file which contains the sqlite file
+setwd('/Users/merle/Desktop/Experimente/Lab.js Studien/Bachelorarbeit/MultiRace/Daten Online') 
+
+
+# 1.2 Import data from SQLite file
+# Connection to your database (aka the SQLite file)  
+# You just have to change the dbname-part if your file is not called data.sqlite
+con <- dbConnect(drv=RSQLite::SQLite(),dbname='data.sqlite') 
+
+
+# 1.3 Get the data from the database
+data <- dbGetQuery(conn=con,statement='SELECT * FROM labjs')
+
+
+# 1.4 Close the connection to the database 
+dbDisconnect(conn=con)
+rm(con)
+
+
+# 1.5 Extract metadata
+d.meta <- map_dfr(data$metadata, fromJSON) %>%
+  dplyr::rename(
+    observation=id # rename the observation column
+  )
+
+d <- data %>%
+  bind_cols(d.meta) %>%
+  select(
+    -metadata # Select everything except for the meatdata column
+  )
+
+# 1.6 Remove temporary df
+rm(d.meta)
+
+
+# 1.7 Shorten the random IDs
+
+# 1.7.1 Define the function "count_unique"
+count_unique <- function(x) {
+  return(length(unique(x)))
+}
+
+# 1.7.2 Define the function "information_preserved"
+information_preserved <- function(x, length) {
+  return(
+    count_unique(str_sub(x, end=i)) ==
+      count_unique(x)
+  )
+}
+
+# 1.8 Figure out the length of the random ids needed to preserve the information therein. 
+for (i in 1:36) {
+  if (
+    information_preserved(d$session, i) &&
+    information_preserved(d$observation, i)
+  ) {
+    break()
+  }
+}
+
+d <- d %>%
+  dplyr::mutate( # I think "mutate" adds new variables while preserving the old ones?
+    session=str_sub(session, end=i),
+    observation=str_sub(observation, end=i)
+  )
+
+rm(i, information_preserved)
+
+
+# 1.9 Prepare to extract JSON data
+# Define new function parseJSON, which transforms the SQLite-dataset
+parseJSON <- function(input) {
+  return(input %>%
+           fromJSON(flatten=T) %>% { # I think you use "flatten" to change 
+             # Coerce lists          # the structure of the df, so it has less dimensions
+             if (class(.) == 'list') {
+               discard(., is.null) %>%
+                 as_tibble()
+             } else {
+               .
+             } } %>%
+           # Sanitize names
+           # This removes accents (like in "??" or "??") and turns 
+           # ASCII-symbols to letters for example
+           janitor::clean_names() %>%
+           # Use only strings for now, and re-encode types later
+           mutate_all(as.character)
+  )
+}
+
+
+# 1.10 Dataset 1: extract only complete datasets (where payload == full)
+d.full <- d %>%
+  dplyr::filter(payload == 'full')
+if (nrow(d.full) > 0) {
+  d.full %>%
+    group_by(observation, id) %>%
+    do(
+      { map_dfr(.$data, parseJSON) } %>%
+        bind_rows()
+    ) %>%
+    ungroup() %>%
+    select(-id) -> d.full
+}
+
+
+# 1.11 Postprocessing
+# It would be nice if some columns were completed so that all 
+# cells contain the same value, even if only a subset is filled.
+d.full %>%
+  group_by(observation) %>%
+  fill(matches('code'), .direction='down') %>%
+  fill(matches('code'), .direction='up') %>%
+  ungroup() -> d.output
+
+
+# 1.12 Delete duplicated rows
+# Should work, but we don't have duplicated rows in our dataset rn
+d.full<-unique(d.full) #probably works, we don't have duplicated rows in our dataset
+
+
+# 1.13 Export data if you want to
+# Write data back to disk in csv format.
+# write_csv(d.full, 'd.full.csv')
+
+
+### 2. Create the nested lists 
+
+VP_data <- list()
+MultiRace <- data.frame()
+
+# 2.1 Select everything but the meta-data to unclutter the df a bit 
+d.full <- subset(d.full, select=-c(url, sender_id, time_render, time_run, 
+                                   time_show, time_end, time_commit, time_switch, 
+                                   meta_location, meta_locale, meta_time_zone, 
+                                   meta_timezone_offset, meta_labjs_version, 
+                                   meta_user_agent, meta_platform, meta_language,
+                                   meta_screen_width, meta_screen_height, 
+                                   meta_scroll_width, meta_scroll_height,
+                                   meta_window_inner_width, meta_window_inner_height,
+                                   meta_device_pixel_ratio, meta_labjs_build_flavor, 
+                                   meta_labjs_build_commit))
+
+
+
+
+# The observation-code is unique for each session.
+# Get all codes:
+subjects <- unique(d.full$observation)
+
+for (i in subjects) {
+  
+  # 1.3.1. Get data for one participant
+  
+  VP <- subset(d.full, observation == i) # use only the part of the df that belongs to the current subject
+  
+  
+  # 1.3.2 Get information concerning the experiment (Demographics)
+  position_code <-  which(VP$sender == "Participant's Code")   
+  Demographics_Value <- as.character(VP[position_code, "id_participant"])
+  Demographics_Label <- "id_participant"
+  
+  
+  # 1.3.2.1 Find row with the demographics (for id_gender, id_birth,...)
+  position_demographics <-  which(VP$sender == "Demographics")   
+  
+  dem_start <- which(colnames(VP) == "id_birth")
+  dem_end <- which(colnames(VP) == "id_hearing")
+  
+  for (j in dem_start:dem_end) {
+    tmp <- as.character(VP[position_demographics, colnames(VP)[j] ])
+    Demographics_Value <- c(Demographics_Value, tmp)
+    Demographics_Label <- c(Demographics_Label, colnames(VP)[j])
+  }
+  
+  # age = year the data was collected - subject's year of birth
+  age <- as.numeric(substr(VP$timestamp[1],1,4)) 
+  - as.numeric(substr(Demographics_Value[2],1,4))                 
+  
+  Demographics_Value <- c(Demographics_Value, age)
+  Demographics_Label <- c(Demographics_Label, "id_age")
+  
+  
+  # 1.3.2.2 Combine Demographics to Data Frame and Clean up
+  Demographics <- data.frame("Label" = Demographics_Label,
+                             "Value" = Demographics_Value, stringsAsFactors = F)  
+  Demographics[Demographics ==""] <- NA
+  Demographics <- na.omit(Demographics)
+  
+  
+  # 1.3.3. Get information concerning the experiment (Feedback)
+  Feedback_Value <- NULL
+  Feedback_Label <- NULL
+  
+  
+  # 1.3.2.1 Find Row with the feedback
+  position_feedback <-  which(VP$sender == "last questions") 
+  
+  exp_start <- which(colnames(VP) == "exp_auditory")
+  exp_end <- which(colnames(VP) == "exp_visual")
+  for (j in exp_start:exp_end) {
+    tmp <- as.character(VP[position_feedback, colnames(VP)[j] ])
+    Feedback_Value <- c(Feedback_Value, tmp)
+    Feedback_Label <- c(Feedback_Label, colnames(VP)[j])
+  }
+  
+  Feedback <- data.frame("Label" = Feedback_Label,
+                         "Value" = Feedback_Value, stringsAsFactors = F)
+  
+  # 1.3.4. Get the Data
+  # 1.3.4.1 List and find the rows with the names of the blocks
+  
+  #row_names <- c("Sound Instructions", "1. Block (Trial), 18 Stimuli", 
+  #               "2. Block, 90 Stimuli", "3. Block, 90 Stimuli")
+  row_names <- c("1. Block (Trial), 18 Stimuli", 
+                 "2. Block, 90 Stimuli", "3. Block, 90 Stimuli") # Excluding Trainings
+  
+  # 1.3.4.2 add a vector with the correct block names:
+  # block_names <- c("1. Block (Trial), 18 Stimuli", "2. Block, 90 Stimuli", 
+  #                  "3. Block, 90 Stimuli", "4. Block, 90 Stimuli")
+  block_names <- c("2. Block, 90 Stimuli", "3. Block, 90 Stimuli", 
+                   "4. Block, 90 Stimuli") # Excluding Trainings
+  
+  
+  # 1.3.4.3 get list with all positions of the blocks
+  pos <- list()
+  for (k in 1:length(row_names)) {	
+    pos[k] <- which(VP$sender == row_names[k])
+  }
+  
+  pos[length(pos)+1] <- length(VP$observation) # the end of the last block is (more or less) the end of the dataset 
+  
+  
+  # If the position of the reaction slide is > the position of the sound instructions slide and 
+  # < the position of the title of the first block, it belongs to the first block.
+  # Everything between block 1 and block 2 belongs to block 2, same procedure for the other two blocks. 
+  
+  for (blocknumber in 1:(length(pos)-1)){ # length(pos)-1 = onset of the last block
+    
+    # 1.3.4.4 Get Block On- and Offsets  
+    onset  <- c(as.numeric(unlist(pos[blocknumber]))) 
+    offset <- c(as.numeric(unlist(pos[blocknumber+1]))) # onset of next block (or end of dataset)
+    
+    # 1.3.4.5 Get only the reactions from one block
+    # you could add ended_on == "response" to filter the responses
+    block <- subset(VP[onset:offset, ], sender == "reaction" ) 
+    
+    # 1.3.4.6 Get the data    
+    Label <- as.factor(unlist(block[ ,"label"]))
+    Value <- as.numeric(unlist(block[ ,"duration"]))
+    Block <- as.factor(unlist(block_names[blocknumber]))
+    
+    tmp_frame <-  data.frame("Label" = Label,
+                             "Value" = Value, 
+                             "Block" = Block,
+                             stringsAsFactors = F)
+    
+    # 1.3.4.7 And Add to big list
+    MultiRace <- as.data.frame(rbind(MultiRace, tmp_frame))
+  }# block loop
+  
+  
+  # 1.3.5 Put lists into list:
+  tmplist <- list(Demographics, Feedback, MultiRace)
+  VP_data[i] <- list(tmplist)
+  
+  MultiRace <- data.frame() # clear the df for the next subject
+}
+
+# When I rename the dfs, I get a lot of unrelated warnings. I googled it and it seems to be a bug in R's diagnostics tool. Yikes. 
+for (i in 1:length(VP_data)){
+  names(VP_data)[i] <- paste0("VP_", as.character(i))
+}
+
+
+### 2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_data, file='VP_data')
+
+
+### 3. Preprocessing: Clean the dataset
+VP_data_1 <- VP_data # Save from harm :-)
+
+## 3.1 Exclude datasets of participants with poor eyesight, impaired hearing, etc.
+
+# Criteria for exclusion: Remove if...  
+# ... id_eyesight, id_hearing, id_neuro, id_drugs and exp_delay is "yes"
+# ... exp_auditory and exp_visual is "no"
+
+VP_clean <- list() # Placeholder for the cleaned datasets
+
+# 3.1.2 Impaired Demographics
+dem_sel <- c("id_drugs","id_eyesight","id_hearing","id_neuro")
+
+# VP-Loop
+for(i in 1:length(VP_data)) { 
+  # Selection-Loop
+  for (j in 1:length(dem_sel)) {
+    tmppos <- which(VP_data$VP_1[[1]]$Label == dem_sel[j])
+    
+    VP <- VP_data[[i]] 
+    
+    if (VP[[1]]$Value[[tmppos]] == "yes"){  
+      VP <-  NA 
+      VP_clean[[i]] <- VP
+      
+    } else {
+      VP_clean[[i]] <- VP_data[[i]]
+      names(VP_clean)[i] <- paste0("VP_", as.character(i))
+    } # IF	
+  } # Selection
+} # VP
+
+
+#	# 3.1.3 Impaired Experiment
+#	exp_sel <- c("exp_delay","exp_auditory","exp_visual")
+#	exp_pass <- c("no","yes","yes") # Which values are OK to let pass?
+#	# These could also be negative statements -> which values to exclude
+#
+#	# VP-Loop
+#	for(i in 1:length(VP_data)) { 
+#		# Selection-Loop
+#		for (j in 1:length(exp_sel)) {
+#			tmppos <- which(VP_data$VP_1[[2]]$Label == exp_sel[j])
+#			
+#			VP <- VP_data[[i]]
+#			
+#			if (is.null(VP[[2]]$Value[[tmppos]])) { 
+#   			VP[[2]]$Value[[tmppos]] <- NA 
+#  			VP <-  NA 
+# 			VP_clean[[i]] <- VP        
+#  			
+#  			} else if (VP[[2]]$Value[[tmppos]] != exp_pass[j]){  
+#    			VP <-  NA 
+#    			VP_clean[[i]] <- VP
+#  			
+#  			} else {
+#    		next()
+#  			} # IF
+#		} # Selection
+#  	}  # VP
+
+
+# 3.1.4 Remove NAs
+if (length(which(is.na(VP_clean))) != 0){
+  VP_clean <- VP_clean[-which(is.na(VP_clean))]
+}
+
+### 3.2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_clean, file='VP_clean')
+
+
+
+#__________________________________________________
+# Prepare dfs for the stats part:
+
+# We need simpler dfs + a df with the timing precision
+
+# 4. Simplify VP_clean & merge Codes and Birthdays for better identification
+
+rm(list=setdiff(ls(), "VP_clean")) #remove everything except for VP_clean
+
+# 4.1 Codes
+
+# placeholders
+Code <- as.character() 
+Age <- as.character() 
+
+for (VP in VP_clean){
+  
+  subj_Code <- c(VP[[1]]$Value[1]) # get Code of the current subject
+  Bday <- c(VP[[1]]$Value[2]) # get birthday of the current subject
+  
+  Code <- c(Code, subj_Code) #put all Codes into a vector
+  Age <- append(Age, Bday, after = length(Age)) # same thing for the birthdays
+  
+} 
+rm(VP, subj_Code, Bday)
+
+# Create new Codes (some participants have the same code, but different birthdays)
+New_codes_online <- c(paste(Code, Age, 
+                             sep = "_", collapse = NULL)) 
+# Code and Birthday will be separated by a _
+rm(Code, Age)
+
+
+# 4.2 Now the RTs, conditions and blocks:
+
+# create a placeholder
+RTs_all <- data.frame()
+
+for (VP in VP_clean){
+  
+  # Get reaction times 
+  RTs_subject <- VP[[3]]
+  RTs_all <- rbind(RTs_all, RTs_subject)
+  
+}
+rm(VP, RTs_subject)
+
+
+# 4.3 Combine Codes and the small df
+
+# First we need a Code as an identifier for each row in RTs_all:
+Codes <- c(rep(New_codes_online, 
+               each = length(RTs_all$Label)/length(VP_clean)))
+
+
+# Combine the df and the Codes
+df_Online <- as.data.frame(cbind(Codes, RTs_all))
+rm(Codes, New_codes_online, RTs_all)
+
+# save the df:
+#setwd('/Users/merle/Desktop/Experimente/Lab.js Studien/Bachelorarbeit/MultiRace')
+#write.csv(df_Online, file = "df_Online.csv")
