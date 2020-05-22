@@ -1,0 +1,296 @@
+# Read in CSV file from lab.js for the Sound Induced Flash Illusion (SIFI)
+# Feb 2020 Version by Merle Marie Schuckart
+
+# You can find the latest version of this script on my Github account here:
+# https://github.com/MMarieSchuckart/R-scripts/blob/master/SIFI/SIFI_CSV_Feb2020
+
+### 1. Reading in the data
+
+## 1.1 Set Working Directory
+setwd('/Users/merle/Desktop/Daten SIFI Labor Feb 2020')
+
+## 1.2 Get the list of files in the Directory
+file_list <- list.files(pattern='.csv')
+
+## 1.3 Loop through files to read in data
+VP_data <- list() # Create placeholder for the main list
+
+for (i in 1:length(file_list)) {
+  
+  # 1.3.1. Get data for one participant
+  VP <- data.frame((read.csv(file_list[i])), stringsAsFactors = F)
+  
+  # 1.3.2 Get information concerning the experiment (Demographics)
+  position_code <-  which(VP$sender == "participant's ID")   
+  Demographics_Value <- as.character(VP[position_code, "id_participant"])
+  Demographics_Label <- "id_participant"
+  
+  # 1.3.2.1 Find Row with the demographics (for id_gender, id_birth,...)
+  position_demographics <-  which(VP$sender == "demographics")   
+  
+  dem_start <- which(colnames(VP) == "id_birth")
+  dem_end <- which(colnames(VP) == "id_neuro")
+  
+  for (j in dem_start:dem_end) {
+    tmp <- as.character(VP[position_demographics, colnames(VP)[j] ])
+    Demographics_Value <- c(Demographics_Value, tmp)
+    Demographics_Label <- c(Demographics_Label, colnames(VP)[j])
+  }
+  
+  age <- as.numeric(substr(VP$timestamp[1],1,4)) - as.numeric(substr(Demographics_Value[2],1,4))                 
+  Demographics_Value <- c(Demographics_Value, age)
+  Demographics_Label <- c(Demographics_Label, "id_age")
+  
+  # 1.3.2.2 Combine Demographics to Data Frame and Clean up
+  Demographics <- data.frame("Label" = Demographics_Label,
+                             "Value" = Demographics_Value, stringsAsFactors = F)  
+  Demographics[Demographics ==""] <- NA
+  Demographics <- na.omit(Demographics)
+  
+  # 1.3.3. Get information concerning the experiment (Feedback)
+  Feedback_Value <- NULL
+  Feedback_Label <- NULL
+  
+  # 1.3.2.1 Find Row with the feedback
+  position_feedback <-  which(VP$sender == "last questions") 
+  
+  exp_start <- which(colnames(VP) == "exp_auditory")
+  exp_end <- which(colnames(VP) == "exp_visual")
+  for (j in exp_start:exp_end) {
+    tmp <- as.character(VP[position_feedback, colnames(VP)[j] ])
+    Feedback_Value <- c(Feedback_Value, tmp)
+    Feedback_Label <- c(Feedback_Label, colnames(VP)[j])
+  }
+  
+  Feedback <- data.frame("Label" = Feedback_Label,
+                         "Value" = Feedback_Value, stringsAsFactors = F)
+  
+  # 1.3.4. Get the Data
+  # 1.3.4.1 Change Event-IDs to Numeric
+  VP$sender_id <- as.numeric(sub("_.*", "", VP$sender_id))
+  
+  # 1.3.4.2 List and Find the Rows with the names of the blocks?
+  #row_names <- c("no-back training","no-back main","0-back training","0-back main","1-back training","1-back main","2-back training","2-back main")
+  row_names <- c("no-back main","0-back main","1-back main","2-back main") # Excluding Trainings
+  pos <- list()
+  for (k in 1:length(row_names)) {	
+    pos[k] <- which(VP$sender == row_names[k])
+  }
+  
+  # 1.3.4.3 Find the Event ID Indicating the Block Onset
+  block_onset <- list()
+  for (k in 1:length(pos)) {
+    block_onset[k] <- as.numeric(VP[as.numeric(pos[k]), "sender_id"])
+  }
+  
+  # 1.3.4.4 SIFI Loop through the data to find the single blocks
+  SIFI <- data.frame()
+  for (l in 1:length(block_onset)) {
+    tmppos <- which((VP$sender == "SIFI response") & 
+                      (VP$sender_id == block_onset[l])) #&
+    #(VP$ended_on == "response")) # I could use this one to filter the responses
+    
+    Label <- as.factor(VP[tmppos, "SIFIlabel"])
+    Value <- as.numeric(VP[tmppos, "duration"])
+    Response <- as.factor(VP[tmppos, "response"])
+    Block <- as.factor(row_names[l])
+    
+    tmp_frame <-  data.frame("Label" = Label,
+                             "Value" = Value, 
+                             "Response" = Response,
+                             "Block" = Block,
+                             stringsAsFactors = F)
+    
+    # And Add to big list
+    SIFI <- rbind(SIFI, tmp_frame)
+  } # SIFI
+  
+  # 1.3.4.5 NBack Loop through the data to find the single blocks
+  resp_names <- c("0-back response","1-back response","2-back response")
+  NBack <- data.frame()
+  for (l in 2:length(block_onset)) {
+    tmppos <- which((VP$sender == resp_names[l-1]) & 
+                      (VP$sender_id == block_onset[l]))
+    
+    Label <- as.factor(VP[tmppos, "nbackmatch"])
+    Value <- as.numeric(VP[tmppos, "duration"])
+    Response <- as.factor(VP[tmppos, "response"])
+    Block <- as.factor(row_names[l])
+    
+    tmp_frame <-  data.frame("Label" = Label,
+                             "Value" = Value, 
+                             "Response" = Response,
+                             "Block" = Block,
+                             stringsAsFactors = F)
+    
+    # And Add to big list
+    NBack <- rbind(NBack, tmp_frame)
+  } # NBack
+  
+  # 1.3.5. Put lists into list:
+  tmplist <- list(Demographics,Feedback,SIFI,NBack)
+  VP_data[i] <- list(tmplist)
+  names(VP_data)[i] <- paste0("VP_", as.character(i))
+}  # VP-Loop
+
+
+### 2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_data, file='VP_data')
+
+
+# There are only 126 (aka 3x42) trials for the nback, but some subjects 
+# have more (e.g. values for 127 or 130 trials)
+# All "fake" trials have something in common: The RT is NA.
+# --> I'll delete all trials with Value = NA. 
+
+for (v in 1:length(VP_data)){ # Loop subjects
+  VP_value <- VP_data[[v]][[4]]
+  for (i in 1:length(VP_value[2])){ # Have a look at each RT value in the n-back df.
+    if (is.na(VP_value[2][i])){ # If that value is NA...
+      # Set Label, response and block to NA:
+      VP_value[1][i] <- NA
+      VP_value[3][i] <- NA 
+      VP_value[4][i] <- NA
+    }#IF
+  }#FOR
+  # Remove all NAs
+  if (length(which(is.na(VP_value[2]))) != 0){ # If there are NA-values...
+    pos_NA <- which(is.na(VP_value[2])) # ... find the position of the NAs...
+    VP_value <- VP_value[-pos_NA,] # ...& delete NAs.
+  }#IF
+  VP_data[[v]][[4]] <- VP_value 
+}#FOR
+
+
+
+### 3. Preprocessing: Clean the dataset
+VP_data_1 <- VP_data # Save from harm :-)
+
+## 3.1 Exclude datasets of participants with poor eyesight, impaired hearing, etc.
+
+# Criteria for exclusion: Remove if...  
+# ... id_eyesight, id_hearing, id_neuro, id_drugs and exp_delay is "yes"
+# ... exp_auditory, exp_letters and exp_visual is "no"
+
+VP_clean <- list() # Placeholder for the Cleaned Datasets
+
+# 3.1.2 Impaired Demograhics
+dem_sel <- c("id_drugs","id_eyesight","id_hearing","id_neuro")
+
+# VP-Loop
+for(i in 1:length(VP_data)) { 
+  # Selection-Loop
+  for (j in 1:length(dem_sel)) {
+    tmppos <- which(VP_data$VP_1[[1]]$Label == dem_sel[j])
+    
+    VP <- VP_data[[i]] 
+    
+    if (VP[[1]]$Value[[tmppos]] == "yes"){  
+      VP <-  NA 
+      VP_clean[[i]] <- VP
+      
+    } else {
+      VP_clean[[i]] <- VP_data[[i]]
+      names(VP_clean)[i] <- paste0("VP_", as.character(i))
+    } # IF	
+  } # Selection
+} # VP
+
+#	# 3.1.3 Impaired Experiment
+#	exp_sel <- c("exp_delay","exp_auditory","exp_visual","exp_letters","exp_delayfrequency","exp_delayintensity")
+#	exp_pass <- c("no","yes","yes","yes","never","zero") # Which values are OK to let pass?
+#	# These could also be negative statements -> which values to exclude
+#
+#	# VP-Loop
+#	for(i in 1:length(VP_data)) { 
+#		# Selection-Loop
+#		for (j in 1:length(exp_sel)) {
+#			tmppos <- which(VP_data$VP_1[[2]]$Label == exp_sel[j])
+#			
+#			VP <- VP_data[[i]]
+#			
+#			if (is.null(VP[[2]]$Value[[tmppos]])) { 
+#   			VP[[2]]$Value[[tmppos]] <- NA 
+#  			VP <-  NA 
+# 			VP_clean[[i]] <- VP        
+#  			
+#  			} else if (VP[[2]]$Value[[tmppos]] != exp_pass[j]){  
+#    			VP <-  NA 
+#    			VP_clean[[i]] <- VP
+#  			
+#  			} else {
+#    		next()
+#  			} # IF
+#		} # Selection
+#  	}  # VP
+
+
+# 3.1.4 Remove NAs
+if (length(which(is.na(VP_clean))) != 0){
+  VP_clean <- VP_clean[-which(is.na(VP_clean))]
+}
+
+### 3.2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_clean, file='VP_clean')
+
+### 4. Post-Processing
+# 1. Compute Response Rates and RTs for SIFI and NBack Conditions
+# 2. Remove Participants if
+#	- SIFI below 10% or above 90% in 2 out of 4 Blocks
+#	- A0V2 below 60% in Block 1 (no back)
+
+VP_clean_1 <- VP_clean # Save from harm
+VP_post <- list() # Placeholder
+
+for (i in 1:length(VP_clean)){
+  
+  VP <- VP_clean[[i]] 
+  
+  # 4.2. SIFI Response Rates
+  tr_count <- NULL
+  ill_count <- NULL 
+  for (b in 1:length(levels(VP[3][[1]]$Block))){
+    # How many A2V1 trials are there?
+    tr_count[b] <- length(which(VP[3][[1]]$Label == 'A2V1' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b]))
+    # How many illusions were perceived?
+    ill_count[b] <- length(which(VP[3][[1]]$Label == 'A2V1' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b] & VP[3][[1]]$Response == "2"))
+  } # FOR
+  
+  Ill <- ill_count/tr_count
+  low <- Ill < .1
+  hi <- Ill > .9
+  if (sum(low) >= 2 | sum(hi) >= 2) {
+    VP_post[[i]] <- NA	
+  } else {
+    VP_post[[i]] <- VP
+  }# IF
+  
+  # 4.3. A0V2 in Block 1 below .6
+  # How many A0V2 trials are there?
+  tr_count <- NULL
+  resp_count <- NULL 
+  tr_count <- length(which(VP[3][[1]]$Label == 'A0V2' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[1]))
+  # How many Stimuli were perceived?
+  resp_count <- length(which(VP[3][[1]]$Label == 'A0V2' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b] & VP[3][[1]]$Response == "2"))
+  
+  A0V2 <- resp_count/tr_count
+  if (A0V2 < .1) {
+    VP_post[[i]] <- NA	
+  } else {
+    VP_post[[i]] <- VP
+  }# IF
+  
+  
+}# FOR
+
+# 4.4 Remove NAs
+if (length(which(is.na(VP_post))) != 0){
+  VP_post <- VP_post[-which(is.na(VP_post))]
+}
+
+
+#### 4. Save data
+# Write data back to disk in RDA format.
+save(VP_post, file='VP_labor_post')
