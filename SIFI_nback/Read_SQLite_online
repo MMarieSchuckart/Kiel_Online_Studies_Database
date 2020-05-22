@@ -1,0 +1,498 @@
+# Read in SQLite file from lab.js for the Sound Induced Flash Illusion (SIFI)
+# February 2020 Version
+# Merle Schuckart
+# you can find the latest version on my Github account: 
+# https://github.com/MMarieSchuckart/R-scripts/blob/master/SIFI/SIFI_CSV_Feb2020
+
+
+
+
+#Install & load packages: 
+# install packages 
+#require('pacman')
+#install.packages('RSQLite') 
+#install.packages('jsonlite') 
+#install.packages('stringr') 
+#install.packages('tidyverse')
+#install.packages('janitor')
+#install.packages("data.table")
+#install.packages("car")
+#install.packages("dplyr")
+
+# load packages  
+library("RSQLite")
+library("jsonlite")
+library("stringr")
+library("tidyverse")
+library("janitor")
+library("data.table")
+library("car")
+library("dplyr")
+
+###### Part 1: Reading in the data and putting everything into nested lists
+
+### The first part of this in which I read in the SQLite 
+### file is actually by Felix Henninger (http://felixhenninger.com).
+
+
+### 1. Reading in the data
+
+# 1.1 Set working directory to the file which contains the sqlite file
+setwd('/Users/merle/Desktop/Daten SIFI Online Feb 2020/')  
+
+# 1.2 Import data from SQLite file
+# Connection to your database (aka the SQLite file)  
+# You just have to change the dbname-part if your file is not called data.sqlite
+con <- dbConnect(drv=RSQLite::SQLite(),dbname='data.sqlite') 
+
+# 1.3 Get the data from the database
+data <- dbGetQuery(conn=con,statement='SELECT * FROM labjs')
+
+# 1.4 Close the connection to the database 
+dbDisconnect(conn=con)
+rm(con)
+
+# 1.5 Extract metadata
+d.meta <- map_dfr(data$metadata, fromJSON) %>%
+  dplyr::rename(
+    observation=id # rename the observation column
+  )
+
+d <- data %>%
+  bind_cols(d.meta) %>%
+  select(
+    -metadata # Select everything except for the metadata column
+  )
+
+# 1.6 Remove temporary df
+rm(d.meta)
+
+# 1.7 Shorten the random IDs
+
+# 1.7.1 Define the function "count_unique"
+count_unique <- function(x) {
+  return(length(unique(x)))
+}
+
+# 1.7.2 Define the function "information_preserved"
+information_preserved <- function(x, length) {
+  return(
+    count_unique(str_sub(x, end=i)) ==
+      count_unique(x)
+  )
+}
+
+# 1.8 Figure out the length of the random ids needed to preserve the information therein. 
+for (i in 1:36) {
+  if (
+    information_preserved(d$session, i) &&
+    information_preserved(d$observation, i)
+  ) {
+    break()
+  }
+}
+
+d <- d %>%
+  dplyr::mutate( # I think "mutate" adds new variables while preserving the old ones?
+    session=str_sub(session, end=i),
+    observation=str_sub(observation, end=i)
+  )
+
+rm(i, information_preserved)
+
+
+# 1.9 Prepare to extract JSON data
+# Define new function parseJSON, which transforms the SQLite-dataset
+parseJSON <- function(input) {
+  return(input %>%
+           fromJSON(flatten=T) %>% { # I think you use "flatten" to change 
+             # Coerce lists          # the structure of the df, so it has less dimensions
+             if (class(.) == 'list') {
+               discard(., is.null) %>%
+                 as_tibble()
+             } else {
+               .
+             } } %>%
+           # Sanitize names
+           # This removes accents (like in "??" or "??") and turns 
+           # ASCII-symbols to letters for example
+           janitor::clean_names() %>%
+           # Use only strings for now, and re-encode types later
+           mutate_all(as.character)
+  )
+}
+
+# 1.10 Dataset 1: extract all datasets (even when they are not completed)
+d.full <- d %>%
+  dplyr::filter(payload == 'incremental') # alternative for getting only complete datasets: payload == "full"
+if (nrow(d.full) > 0) {
+  d.full %>%
+    group_by(observation, id) %>%
+    do(
+      { map_dfr(.$data, parseJSON) } %>%
+        bind_rows()
+    ) %>%
+    ungroup() %>%
+    select(-id) -> d.full
+}
+
+# 1.11 Postprocessing 
+# It would be nice if some columns were completed so that all 
+# cells contain the same value, even if only a subset is filled.
+d.full %>%
+  group_by(observation) %>%
+  fill(matches('code'), .direction='down') %>%
+  fill(matches('code'), .direction='up') %>%
+  ungroup() -> d.output
+
+# 1.12 Delete duplicated rows
+# Should work, but we don't have duplicated rows in our dataset rn
+d.full<-unique(d.full) #probably works, we don't have duplicated rows in our dataset
+
+# 1.13 Export data if you want to
+# Write data back to disk in csv format.
+# write_csv(d.full, 'd.full.csv')
+
+VP_data <- list()
+SIFI <- data.frame()
+
+# 2.1 Select everything but the meta-data to unclutter the df a bit 
+d.full <- subset(d.full, select=-c(url, time_render, time_run, 
+                                   time_show, time_end, time_commit, time_switch, 
+                                   meta_location, meta_locale, meta_time_zone, 
+                                   meta_timezone_offset, meta_labjs_version, 
+                                   meta_user_agent, meta_platform, meta_language,
+                                   meta_screen_width, meta_screen_height, 
+                                   meta_scroll_width, meta_scroll_height,
+                                   meta_window_inner_width, meta_window_inner_height,
+                                   meta_device_pixel_ratio, meta_labjs_build_flavor, 
+                                   meta_labjs_build_commit))
+
+
+
+
+# The observation-code is unique for each session.
+# Get all codes:
+subjects <- unique(d.full$observation)
+counter <- 1
+
+for (obs_code_pos in (1:length(subjects))) {
+  
+  # 1.3.1. Get data for one participant
+  i <-  subjects[obs_code_pos]
+  
+  VP <- subset(d.full, observation == i) # use only the part of the df that belongs to the current subject
+  
+  if ((length(VP$observation) < 2223) && (obs_code_pos < length(subjects))) {    
+    obs_code_pos <-  obs_code_pos + 1  # next subject, because the current subject didn't make it to the questions slide (= slide 2223)
+  } 
+  
+  else if ((length(VP$observation) >= 2223) && (obs_code_pos <= length(subjects))) {   
+    
+    # 1.3.2 Get information concerning the experiment (Demographics)
+    position_code <-  which(VP$sender == "participant's ID")   
+    Demographics_Value <- as.character(VP[position_code, "id_participant"])
+    Demographics_Label <- "id_participant"
+    
+    # 1.3.2.1 Find Row with the demographics (for id_gender, id_birth,...)
+    position_demographics <-  which(VP$sender == "demographics")   
+    
+    dem_start <- which(colnames(VP) == "id_gender")
+    dem_end <- which(colnames(VP) == "id_hearing")
+    
+    for (j in dem_start:dem_end) {
+      tmp <- as.character(VP[position_demographics, colnames(VP)[j] ])
+      Demographics_Value <- c(Demographics_Value, tmp)
+      Demographics_Label <- c(Demographics_Label, colnames(VP)[j])
+    }
+    
+    age <- as.numeric(substr(VP$timestamp[1],1,4)) - as.numeric(substr(Demographics_Value[3],1,4))                 
+    Demographics_Value <- c(Demographics_Value, age)
+    Demographics_Label <- c(Demographics_Label, "id_age")
+    
+    # 1.3.2.2 Combine Demographics to Data Frame and Clean up
+    Demographics <- data.frame("Label" = Demographics_Label,
+                               "Value" = Demographics_Value, stringsAsFactors = F)  
+    Demographics[Demographics ==""] <- NA
+    Demographics <- na.omit(Demographics)
+    
+    # 1.3.3. Get information concerning the experiment (Feedback)
+    Feedback_Value <- NULL
+    Feedback_Label <- NULL
+    
+    # 1.3.2.1 Find Row with the feedback
+    position_feedback <-  which(VP$sender == "last questions") 
+    
+    exp_start <- which(colnames(VP) == "exp_letters")
+    exp_end <- which(colnames(VP) == "exp_browser")
+    for (j in exp_start:exp_end) {
+      tmp <- as.character(VP[position_feedback, colnames(VP)[j] ])
+      Feedback_Value <- c(Feedback_Value, tmp)
+      Feedback_Label <- c(Feedback_Label, colnames(VP)[j])
+    }
+    
+    Feedback <- data.frame("Label" = Feedback_Label,
+                           "Value" = Feedback_Value, stringsAsFactors = F)
+    
+    # 1.3.4. Get the Data
+    # 1.3.4.1 Change Event-IDs to Numeric
+    VP$sender_id <- as.numeric(sub("_.*", "", VP$sender_id))
+    
+    # 1.3.4.2 List and Find the Rows with the names of the blocks?
+    #row_names <- c("no-back training","no-back main","0-back training","0-back main","1-back training","1-back main","2-back training","2-back main")
+    row_names <- c("no-back main","0-back main","1-back main","2-back main") # Excluding Trainings
+    pos <- list()
+    for (k in 1:length(row_names)) {	
+      pos[k] <- which(VP$sender == row_names[k])
+    }
+    
+    # 1.3.4.3 Find the Event ID Indicating the Block Onset
+    block_onset <- list()
+    for (k in 1:length(pos)) {
+      block_onset[k] <- as.numeric(VP[as.numeric(pos[k]), "sender_id"])
+    }
+    
+    # 1.3.4.4 SIFI Loop through the data to find the single blocks
+    
+    # typecast this one again:
+    VP <- as.data.frame(VP)
+    
+    # create placeholder
+    SIFI <- data.frame()
+    
+    for (l in 1:length(block_onset)) {
+      tmppos <- which((VP$sender == "SIFI response") & 
+                        (VP$sender_id == block_onset[l])) #&
+      #(VP$ended_on == "response"))) # I could use this one to filter the responses
+      
+      Label <- as.factor(VP[tmppos, "sif_ilabel"])
+      Value <- as.numeric(VP[tmppos, "duration"])
+      Response <- as.factor(VP[tmppos, "response"])
+      Block <- as.factor(row_names[l])
+      
+      tmp_frame <-  data.frame("Label" = Label,
+                               "Value" = Value, 
+                               "Response" = Response,
+                               "Block" = Block,
+                               stringsAsFactors = F)
+      
+      # And Add to big list
+      SIFI <- rbind(SIFI, tmp_frame)
+    } # SIFI
+    
+    # 1.3.4.5 NBack Loop through the data to find the single blocks
+    resp_names <- c("0-back response","1-back response","2-back response")
+    NBack <- data.frame()
+    for (l in 2:length(block_onset)) {
+      tmppos <- which((VP$sender == resp_names[l-1]) & 
+                        (VP$sender_id == block_onset[l]))
+      
+      Label <- as.factor(VP[tmppos, "nbackmatch"])
+      Value <- as.numeric(VP[tmppos, "duration"])
+      Response <- as.factor(VP[tmppos, "response"])
+      Block <- as.factor(row_names[l])
+      
+      # If the subject didn't press the X in the n-back, this means they didn't  
+      # see a target, so I want to coerce every NA to FALSE:
+      
+      Response <- as.logical(Response) # turn everything to logicals
+      pos_true <- which(Response == TRUE) # Find all TRUEs
+      for (m in (1:length(Response))){
+        if (length(which(pos_true == m)) == 0){ # If the current position doesn't have the value TRUE...
+          # it must be NA aka FALSE:
+          Response[m] <- FALSE
+        } 
+      }
+      
+      tmp_frame <-  data.frame("Label" = Label,
+                               "Value" = Value, 
+                               "Response" = Response,
+                               "Block" = Block,
+                               stringsAsFactors = F)
+      
+      # And Add to big list
+      NBack <- rbind(NBack, tmp_frame)
+    } # NBack
+    
+    # 1.3.5. Put lists into list:
+    tmplist <- list(Demographics,Feedback,SIFI,NBack)
+    VP_data[counter] <- list(tmplist)
+    names(VP_data)[counter] <- paste0("VP_", as.character(obs_code_pos))
+    counter <- counter + 1
+  } # loop for full dataset
+}  # loop for current dataset
+
+
+### 2. Save data if you want to
+# Write data back to disk in RDA format.
+
+#save(VP_data, file='VP_data')
+
+# Save from harm :-)
+VP_data_1 <- VP_data
+
+# Remove NAs
+if (length(which(is.na(VP_data))) != 0){
+  VP_data <- VP_data[-which(is.na(VP_data))]
+}
+
+
+# Okay now this is weird: There are only 126 (aka 3x42) trials
+# for the nback, but some subjects have more (e.g. values for 127 or 130 trials)
+# All "fake" trials have something in common: The RT is NA.
+# --> I'll delete all trials with Value = NA. 
+
+for (v in 1:length(VP_data)){ # Loop subjects
+  VP_value <- VP_data[[v]][[4]]
+  for (i in 1:length(VP_value[2])){ # Have a look at each RT value in the n-back df.
+    if (is.na(VP_value[2][i])){ # If that value is NA...
+      # Set Label, response and block to NA:
+      VP_value[1][i] <- NA
+      VP_value[3][i] <- NA 
+      VP_value[4][i] <- NA
+    }#IF
+  }#FOR
+  # Remove all NAs
+  if (length(which(is.na(VP_value[2]))) != 0){ # If there are NA-values...
+    pos_NA <- which(is.na(VP_value[2])) # ... find the position of the NAs...
+    VP_value <- VP_value[-pos_NA,] # ...& delete NAs.
+  }#IF
+  VP_data[[v]][[4]] <- VP_value 
+}#FOR
+
+
+### 3. Preproc!
+# Save from harm :-) 
+VP_data2 <- VP_data
+## 3.1 Exclude datasets of participants with poor eyesight, impaired hearing, etc.
+
+# Criteria for exclusion: Remove if...  
+# ... id_eyesight, id_hearing, id_neuro, id_drugs and exp_delay is "yes"
+# ... exp_auditory, exp_letters and exp_visual is "no"         
+
+VP_clean <- list() # Placeholder for the Cleaned Datasets
+
+# 3.1.2 Impaired Demograhics
+dem_sel <- c("id_drugs","id_eyesight","id_hearing","id_neuro")
+
+# VP-Loop
+for(i in 1:length(VP_data)) { 
+  # Selection-Loop
+  for (j in 1:length(dem_sel)) {
+    tmppos <- which(VP_data$VP_1[[1]]$Label == dem_sel[j]) # Select the positions of the criteria drugs, eyesight, hearing & neuro
+    
+    VP <- VP_data[[i]] # Get current participant
+    
+    if (VP[[1]]$Value[[tmppos]] == "yes"){  # If the participant answered "yes", exclude participant.
+      VP <-  NA 
+      VP_clean[[i]] <- VP
+      
+    } else if (VP[[1]]$Value[[tmppos]] == "no"){ # If everything's fine, keep the data.
+      VP_clean[[i]] <- VP_data[[i]]
+      names(VP_clean)[i] <- paste0("VP_", as.character(i))
+    } # IF	
+  } # Selection
+} # VP
+
+
+#	# 3.1.3 Impaired Experiment
+#	exp_sel <- c("exp_delay","exp_auditory","exp_visual","exp_letters","exp_delayfrequency","exp_delayintensity")
+#	exp_pass <- c("no","yes","yes","yes","never","zero") # Which values are OK to let pass?
+#	# These could also be negative statements -> which values to exclude
+#
+#	# VP-Loop
+#	for(i in 1:length(VP_data)) { 
+#		# Selection-Loop
+#		for (j in 1:length(exp_sel)) {
+#			tmppos <- which(VP_data$VP_1[[2]]$Label == exp_sel[j])
+#			
+#			VP <- VP_data[[i]]
+#			
+#			if (is.null(VP[[2]]$Value[[tmppos]])) { 
+#   			VP[[2]]$Value[[tmppos]] <- NA 
+#  			VP <-  NA 
+# 			VP_clean[[i]] <- VP        
+#  			
+#  			} else if (VP[[2]]$Value[[tmppos]] != exp_pass[j]){  
+#    			VP <-  NA 
+#    			VP_clean[[i]] <- VP
+#  			
+#  			} else {
+#    		next()
+#  			} # IF
+#		} # Selection
+#  	}  # VP
+
+
+# 3.1.4 Remove NAs
+if (length(which(is.na(VP_clean))) != 0){
+  VP_clean <- VP_clean[-which(is.na(VP_clean))]
+}
+
+### 3.2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_clean, file='VP_clean')
+
+
+### 4. Postprocessing! 
+VP_clean1 <- VP_clean # Save from harm :-)
+
+# 1. Compute Response Rates and RTs for SIFI and n-Back Conditions
+# 2. Remove Participants if
+#	- SIFI below 10% or above 90% in 2 out of 4 Blocks
+#	- A0V2 below 60% in Block 1 (no back)
+
+VP_post <- list() # Placeholder
+
+for (i in 1:length(VP_clean)){
+  
+  VP <- VP_clean[[i]] 
+  
+  # 4.2. SIFI Response Rates
+  tr_count <- NULL
+  ill_count <- NULL 
+  for (b in 1:length(levels(VP[3][[1]]$Block))){
+    # How many A2V1 trials are there?
+    tr_count[b] <- length(which(VP[3][[1]]$Label == 'A2V1' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b]))
+    # How many illusions were perceived?
+    ill_count[b] <- length(which(VP[3][[1]]$Label == 'A2V1' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b] & VP[3][[1]]$Response == "2"))
+  } # FOR
+  
+  Ill <- ill_count/tr_count
+  low <- Ill < .1
+  hi <- Ill > .9
+  if (sum(low) >= 2 | sum(hi) >= 2) {
+    VP_post[[i]] <- NA	
+  } else {
+    VP_post[[i]] <- VP
+  
+  }# IF
+  
+  # 4.3. A0V2 in Block 1 below .6
+  
+  # How many A0V2 trials are there?
+  tr_count <- NULL
+  resp_count <- NULL 
+  tr_count <- length(which(VP[3][[1]]$Label == 'A0V2' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[1]))
+  
+  # How many Stimuli were perceived?
+  resp_count <- length(which(VP[3][[1]]$Label == 'A0V2' & VP[3][[1]]$Block == levels(VP[3][[1]]$Block)[b] & VP[3][[1]]$Response == "2"))
+  
+  A0V2 <- resp_count/tr_count
+  if (A0V2 < .1) {
+    VP_post[[i]] <- NA	
+  } else {
+    VP_post[[i]] <- VP
+  }# IF
+  
+}# FOR
+
+# 4.4 Remove NAs
+if (length(which(is.na(VP_post))) != 0){
+  VP_post <- VP_post[-which(is.na(VP_post))]
+}
+
+
+# And that's it!
+### Save data in RDA format if you want to
+#save(VP_post, file='VP_online_post')
