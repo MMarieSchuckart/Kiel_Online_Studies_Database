@@ -1,15 +1,15 @@
-# Database for Psychological Onlinestudies
+<h1> Database for Psychological Onlinestudies</h1>
 (this is still work in progress and will be updated regularly)
 
 This is a database for online studies conducted at the Institute for Psychology at Kiel University, Germany. 
 Here, you can find experimental and analysis scripts for the following studies:
 
-# Pilot Study: Risk Assessment
+<h3>Pilot Study: Risk Assessment</h3>
 - Participants were asked to write down a dilemma scenario with 2 options for action and to rate the risk of each option.
 - Experimental script (lab.js):
 - Analysis script (R): <br> https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk_pilot/pilot1_Read_SQlite
 
-# Redundant Signals Effect
+<h3>Redundant Signals Effect</h3>
 - replication of the RSE (Todd, 1912): shorter reaction times when responding to multisensory (here: audiovisual) compared to unisensory stimuli (here: visual and auditory)
 - 1 training block, 3 main blocks with 90 trials each
 - Experimental script (lab.js):<br> 
@@ -18,9 +18,8 @@ Here, you can find experimental and analysis scripts for the following studies:
 https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/RSE/Read_CSV_lab <br> 
       - for the online study:<br> 
 https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/RSE/Read_SQLite_online <br> 
-<br> 
 
-# Sound Induced Flash Illusion (SIFI)
+<h3>Sound Induced Flash Illusion (SIFI)</h3>
 - SIFI: Illusionary perception of a double flashe instead of a single one when a flash is presented together with two short beeps
 - replication of the SIFI under different levels of cognitive load, manipulated via n-back-tasks (Michail & Keil, 2018)
 - 4 main Blocks:
