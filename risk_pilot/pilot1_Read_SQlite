@@ -1,0 +1,450 @@
+# Read in lab.js SQLite file for the risk assessment pilot study by Georg Leistenschneider
+# February 2020 Version
+
+
+#Install & load a lot of stuff: 
+
+# install packages 
+#require('pacman')
+#install.packages('RSQLite') 
+#install.packages('jsonlite') 
+#install.packages('stringr') 
+#install.packages('tidyverse')
+#install.packages('janitor')
+#install.packages("data.table")
+#install.packages("car")
+#install.packages("dplyr")
+
+
+# load packages  
+library("RSQLite")
+library("jsonlite")
+library("stringr")
+library("tidyverse")
+library("janitor")
+library("data.table")
+library("car")
+library("dplyr")
+
+
+
+### 1. Reading in the data
+
+# 1.1 Set working directory to the file which contains the sqlite file
+setwd('/Users/merle/Desktop/georgs_ba/')  
+# If this doesn't work, have a look at the direction of the slashes. 
+# They have to look this: /
+
+# 1.2 Import data from SQLite file
+# Connection to your database (aka the SQLite file)  
+# You just have to change the dbname-part if your file is not called data.sqlite
+con <- dbConnect(drv=RSQLite::SQLite(),dbname='data.sqlite') 
+
+
+# 1.3 Get the data from the database
+data <- dbGetQuery(conn=con,statement='SELECT * FROM labjs')
+
+
+# 1.4 Close the connection to the database 
+dbDisconnect(conn=con)
+rm(con)
+
+
+# 1.5 Extract metadata
+d.meta <- map_dfr(data$metadata, fromJSON) %>%
+  dplyr::rename(
+    observation=id # rename the observation column
+  )
+
+d <- data %>%
+  bind_cols(d.meta) %>%
+  select(
+    -metadata # Select everything except for the metadata column
+  )
+
+# 1.6 Remove temporary df
+rm(d.meta)
+
+
+# 1.7 Shorten the random IDs
+
+# 1.7.1 Define the function "count_unique"
+count_unique <- function(x) {
+  return(length(unique(x)))
+}
+
+# 1.7.2 Define the function "information_preserved"
+information_preserved <- function(x, length) {
+  return(
+    count_unique(str_sub(x, end=i)) ==
+      count_unique(x)
+  )
+}
+
+# 1.8 Figure out the length of the random ids needed to preserve the information therein. 
+for (i in 1:36) {
+  if (
+    information_preserved(d$session, i) &&
+    information_preserved(d$observation, i)
+  ) {
+    break()
+  }
+}
+
+d <- d %>%
+  dplyr::mutate( # I think "mutate" adds new variables while preserving the old ones?
+    session=str_sub(session, end=i),
+    observation=str_sub(observation, end=i)
+  )
+
+rm(i, information_preserved)
+
+
+# 1.9 Prepare to extract JSON data
+# Define new function parseJSON, which transforms the SQLite-dataset
+parseJSON <- function(input) {
+  return(input %>%
+           fromJSON(flatten=T) %>% { # You use "flatten" to change 
+             # Coerce lists          # the structure of the df, so it has less dimensions
+             if (class(.) == 'list') {
+               discard(., is.null) %>%
+                 as_tibble()
+             } else {
+               .
+             } } %>%
+           # Sanitize names
+           # This removes accents (you know like the french circonflex or stuff like that)  
+           # and turns ASCII-symbols to letters for example
+           janitor::clean_names() %>%
+           # Use only strings for now, and re-encode types later
+           mutate_all(as.character)
+  )
+}
+
+
+# 1.10 Dataset 1: extract all datasets (even when they are not completed)
+d.full <- d %>%
+  dplyr::filter(payload == 'incremental') # alternative for getting only complete datasets: payload == "full"
+if (nrow(d.full) > 0) {
+  d.full %>%
+    group_by(observation, id) %>%
+    do(
+      { map_dfr(.$data, parseJSON) } %>%
+        bind_rows()
+    ) %>%
+    ungroup() %>%
+    select(-id) -> d.full
+}
+
+
+# 1.11 Postprocessing 
+# It would be nice if some columns were completed so that all 
+# cells contain the same value, even if only a subset is filled.
+d.full %>%
+  group_by(observation) %>%
+  fill(matches('code'), .direction='down') %>%
+  fill(matches('code'), .direction='up') %>%
+  ungroup() -> d.output
+
+
+# 1.12 Delete duplicated rows
+# Should work, but we don't have duplicated rows in our dataset rn
+d.full<-unique(d.full) #probably works, we don't have duplicated rows in our dataset
+
+# 1.13 Export data if you want to
+# Write data back to disk in csv format.
+# write_csv(d.full, 'd.full.csv')
+
+# remove dummy variables
+rm(d, d.output, data, count_unique, parseJSON)
+
+
+
+### 2. Now get table with data
+
+# Table 1: Demographics, although I'm not sure why they're relevant here
+# Table 2: We need stories, optional actions & their ratings
+
+
+# For table 1:
+
+# 2.2 Select important rows (dem, sit & sit2)
+d.full <- d.full[which(d.full$sender == "dem" | d.full$sender == "sit" |d.full$sender == "sit2" ), ]
+
+entries_in_story1 = length(unique(d.full$story1))-1
+
+
+# 2.3 change the structure of the df
+# get story
+story <- as.vector(rbind(d.full$story1, d.full$story2, d.full$story3, d.full$story4,d.full$story5, d.full$story6, 
+               d.full$story7, d.full$story8,d.full$story9, d.full$story10, d.full$story11, d.full$story12,
+               d.full$story13)) 
+# get option a
+storya <- as.vector(rbind(d.full$story1a, d.full$story2a,d.full$story3a,d.full$story4a, d.full$story5a, 
+                          d.full$story6a,d.full$story7a,d.full$story8a,d.full$story9a, d.full$story10a,
+                          d.full$story11a,d.full$story12a,d.full$story13a))
+# get risk for option a
+riska <-  as.integer(rbind(d.full$risk1_opt_a, d.full$risk2_opt_a, d.full$risk3_opt_a, d.full$risk4_opt_a, 
+                           d.full$risk5_opt_a, d.full$risk6_opt_a,d.full$risk7_opt_a, d.full$risk8_opt_a, 
+                           d.full$risk9_opt_a, d.full$risk10_opt_a, d.full$risk11_opt_a, d.full$risk12_opt_a, 
+                           d.full$risk13_opt_a))
+# get option b
+storyb <-  as.vector(rbind(d.full$story1b, d.full$story2b, d.full$story3b, d.full$story4b, d.full$story5b, 
+                           d.full$story6b, d.full$story7b, d.full$story8b, d.full$story9b, d.full$story10b,
+                           d.full$story11b, d.full$story12b, d.full$story13b))
+
+# get risk for option b
+riskb <- as.integer(rbind(d.full$risk1_opt_b, d.full$risk2_opt_b, d.full$risk3_opt_b, d.full$risk4_opt_b,
+                          d.full$risk5_opt_b, d.full$risk6_opt_b, d.full$risk7_opt_b, d.full$risk8_opt_b, 
+                          d.full$risk9_opt_b, d.full$risk10_opt_b, d.full$risk11_opt_b, d.full$risk12_opt_b, 
+                          d.full$risk13_opt_b))
+                          
+# create df
+df_story <- as.data.frame(cbind(story, storya, storyb, riska, riskb))
+# delete all rows with empty values or NAs:
+df_story <-  as.data.frame(subset(df_story, is.na(story) == F & story != ""))
+
+
+
+
+
+# Append old dataset:
+
+### 1. Reading in the data
+
+
+# 1.1 Set working directory to the file which contains the sqlite file
+setwd('/Users/merle/Desktop/georgs_ba/')  
+# If this doesn't work, have a look at the direction of the slashes. 
+# They have to look this: /
+
+# 1.2 Import data from SQLite file
+# Connection to your database (aka the SQLite file)  
+# You just have to change the dbname-part if your file is not called data.sqlite
+con <- dbConnect(drv=RSQLite::SQLite(),dbname='data.sqlite_alt') 
+
+
+# 1.3 Get the data from the database
+data <- dbGetQuery(conn=con,statement='SELECT * FROM labjs')
+
+
+# 1.4 Close the connection to the database 
+dbDisconnect(conn=con)
+rm(con)
+
+
+# 1.5 Extract metadata
+d.meta <- map_dfr(data$metadata, fromJSON) %>%
+  dplyr::rename(
+    observation=id # rename the observation column
+  )
+
+d <- data %>%
+  bind_cols(d.meta) %>%
+  select(
+    -metadata # Select everything except for the metadata column
+  )
+
+# 1.6 Remove temporary df
+rm(d.meta)
+
+
+# 1.7 Shorten the random IDs
+
+# 1.7.1 Define the function "count_unique"
+count_unique <- function(x) {
+  return(length(unique(x)))
+}
+
+# 1.7.2 Define the function "information_preserved"
+information_preserved <- function(x, length) {
+  return(
+    count_unique(str_sub(x, end=i)) ==
+      count_unique(x)
+  )
+}
+
+# 1.8 Figure out the length of the random ids needed to preserve the information therein. 
+for (i in 1:36) {
+  if (
+    information_preserved(d$session, i) &&
+    information_preserved(d$observation, i)
+  ) {
+    break()
+  }
+}
+
+d <- d %>%
+  dplyr::mutate( # I think "mutate" adds new variables while preserving the old ones?
+    session=str_sub(session, end=i),
+    observation=str_sub(observation, end=i)
+  )
+
+rm(i, information_preserved)
+
+
+# 1.9 Prepare to extract JSON data
+# Define new function parseJSON, which transforms the SQLite-dataset
+parseJSON <- function(input) {
+  return(input %>%
+           fromJSON(flatten=T) %>% { # You use "flatten" to change 
+             # Coerce lists          # the structure of the df, so it has less dimensions
+             if (class(.) == 'list') {
+               discard(., is.null) %>%
+                 as_tibble()
+             } else {
+               .
+             } } %>%
+           # Sanitize names
+           # This removes accents (you know like the french circonflex or stuff like that)  
+           # and turns ASCII-symbols to letters for example
+           janitor::clean_names() %>%
+           # Use only strings for now, and re-encode types later
+           mutate_all(as.character)
+  )
+}
+
+
+# 1.10 Dataset 1: extract all datasets (even when they are not completed)
+d.old <- d %>%
+  dplyr::filter(payload == 'incremental') # alternative for getting only complete datasets: payload == "full"
+if (nrow(d.old) > 0) {
+  d.old %>%
+    group_by(observation, id) %>%
+    do(
+      { map_dfr(.$data, parseJSON) } %>%
+        bind_rows()
+    ) %>%
+    ungroup() %>%
+    select(-id) -> d.old
+}
+
+
+# 1.11 Postprocessing 
+# It would be nice if some columns were completed so that all 
+# cells contain the same value, even if only a subset is filled.
+d.old %>%
+  group_by(observation) %>%
+  fill(matches('code'), .direction='down') %>%
+  fill(matches('code'), .direction='up') %>%
+  ungroup() -> d.output
+
+
+# 1.12 Delete duplicated rows
+# Should work, but we don't have duplicated rows in our dataset rn
+d.old<-unique(d.old) #probably works, we don't have duplicated rows in our dataset
+
+# 1.13 Export data if you want to
+# Write data back to disk in csv format.
+# write_csv(d.full, 'd.full.csv')
+
+# remove dummy variables
+rm(d, d.output, data, count_unique, parseJSON)
+
+# Select the important colums
+d.old <- d.old[,c(3, 33:length(d.old))]
+ 
+# Could've done that in the step before, but for more clarity I'll do it separately. :-)
+
+# Select important rows (dem, sit & sit2)
+d.old <- d.old[which(d.old$sender == "dem" | d.old$sender == "sit" |d.old$sender == "sit2" ), ]
+
+# add risk for 11 a and b as NA columns, so that the old df and the new df match in terms of column number
+risk11_opt_a <- c(rep(NA, times = length(d.old$sender)))
+risk11_opt_b <- c(rep(NA, times = length(d.old$sender)))
+
+
+
+
+# 2.3 change the structure of the df
+# get story
+story <- as.vector(rbind(d.old$story1, d.old$story2, d.old$story3, d.old$story4,d.old$story5, d.old$story6, 
+                         d.old$story7, d.old$story8,d.old$story9, d.old$story10, d.old$story11, d.old$story12,
+                         d.old$story13)) 
+# get option a
+storya <- as.vector(rbind(d.old$story1a, d.old$story2a,d.old$story3a,d.old$story4a, d.old$story5a, 
+                          d.old$story6a,d.old$story7a,d.old$story8a,d.old$story9a, d.old$story10a,
+                          d.old$story11a,d.old$story12a,d.old$story13a))
+# get risk for option a
+riska <-  as.integer(rbind(d.old$risk1_opt_a, d.old$risk2_opt_a, d.old$risk3_opt_a, d.old$risk4_opt_a, 
+                           d.old$risk5_opt_a, d.old$risk6_opt_a,d.old$risk7_opt_a, d.old$risk8_opt_a, 
+                           d.old$risk9_opt_a, d.old$risk10_opt_a, risk11_opt_a, d.old$risk12_opt_a, 
+                           d.old$risk13_opt_a))
+# get option b
+storyb <-  as.vector(rbind(d.old$story1b, d.old$story2b, d.old$story3b, d.old$story4b, d.old$story5b, 
+                           d.old$story6b, d.old$story7b, d.old$story8b, d.old$story9b, d.old$story10b,
+                           d.old$story11b, d.old$story12b, d.old$story13b))
+
+# get risk for option b
+riskb <- as.integer(rbind(d.old$risk1_opt_b, d.old$risk2_opt_b, d.old$risk3_opt_b, d.old$risk4_opt_b,
+                          d.old$risk5_opt_b, d.old$risk6_opt_b, d.old$risk7_opt_b, d.old$risk8_opt_b, 
+                          d.old$risk9_opt_b, d.old$risk10_opt_b, risk11_opt_b, d.old$risk12_opt_b, 
+                          d.old$risk13_opt_b))
+
+
+
+# create df
+df_story_old <- as.data.frame(cbind(story, storya, storyb, riska, riskb))
+df_story_old <- df_story_old[complete.cases(df_story_old), ]
+
+
+# rbind the dfs:
+df_story_all <- rbind(df_story, df_story_old)
+
+# delete all rows with empty values or NAs:
+df_story_all <-  as.data.frame(subset(df_story_all, is.na(story) == F & story != ""))
+
+
+# 2.6 delete all rows in which we tested the study
+# If there aren't only test cases:
+if (length(which(df_story_all$story != "test")) != 0){
+  # delete all rows where we tested stuff:
+  df_story_all = df_story_all[which(df_story_all$story != "test"),]
+  df_story_all = df_story_all[which(df_story_all$story != "test2"),]
+  df_story_all = df_story_all[which(df_story_all$storyb != "riskant 7"),]
+  
+  # delete all empty rows
+  df_story_all = df_story_all[which(df_story_all$story != ""),]
+  
+} else {print("Es gibt nur Testfälle, keine richtigen Daten!")}
+
+
+
+# for d.full:
+# get positions of demographics slide
+dem_pos <- which(d.full$sender=="dem")
+gender <- c()
+age <- c()
+# if the next slide is "sit" & there are data in story1, you can get the gender & age
+# as the participant didn't quit.
+for (i in dem_pos){
+  if(d.full[i+1,1] == "sit" && !is.na(d.full[i+1,4]) && d.full[i+1,4]!="test" && d.full[i+1,4]!="test"){
+    gender <- c(gender, as.character(d.full[i,2]))
+    age <- c(age, as.integer(d.full[i,3]))
+  }
+}
+
+
+# für d.old:
+# for d.full:
+# get positions of demographics slide
+dem_pos_old <- which(d.old$sender=="dem")
+gender_old <- c()
+age_old <- c()
+# if the next slide is "sit" & there are data in story1, you can get the gender & age
+# as the participant didn't quit.
+for (i in dem_pos_old){
+  if(d.old[i+1,1] == "sit" && !is.na(d.old[i+1,4]) && d.old[i+1,4]!="test" && d.old[i+1,4]!="test"){
+    gender_old <- c(gender_old, as.character(d.old[i,2]))
+    age_old <- c(age_old, as.integer(d.old[i,3]))
+  }
+}
+
+
+# rbind them:
+
+demographics_df <- as.data.frame(rbind(cbind(age, gender), cbind(age_old, gender_old)))
+
+# Save as CSV
+#write.csv(demographics_df,'demographics_df.csv')
+#write.csv(df_story_all,'df_story_all.csv')
