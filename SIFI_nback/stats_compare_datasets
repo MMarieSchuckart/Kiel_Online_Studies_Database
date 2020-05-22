@@ -1,0 +1,598 @@
+
+### Compare datasets from online & the lab
+### Stats script for the SIFI n-back (online & lab), Feb 2020
+### Merle Schuckart
+
+# This is work in progress but will be updated soon.
+
+# -----------------------------------------------------------
+# Required packages
+
+# for testing normality of distribution:
+#install.packages("nortest")
+library("nortest")
+
+# -----------------------------------------------------------
+#### What does this script do?
+
+### 1st part: Get different kinds of dfs
+
+# 1.  VP_online: All data from online.
+# 2.  VP_lab: All data from the lab.
+# 3.  d.full: contains all trials for each subject in each block and in either one or both of the situations
+
+# 4.  df_in_com: like d.full, but only for subjects who participated both online and in the lab
+# 5.  SIFI: contains all trials for each subject in each block and both situations for the SIFI part
+# 6.  NBACK: contains all trials for each subject in each block and both situations for the NBACK part
+
+# 7.  NBACK_DESR: Median RTs & Accuracies
+# 8.  SIFI_DESR: Median RTs, Illusion rates, Rates of correct responses
+
+# ---------------------------------------------------------------------------------------------------------------------------
+
+# Read in datasets:
+
+# 1. Get online data
+setwd('/Users/merle/Desktop/Bachelorarbeit/Daten/Daten SIFI Online Feb 2020')
+load("VP_online_post")
+VP_online <- VP_post
+
+# 2. Get lab data
+setwd('/Users/merle/Desktop/Bachelorarbeit/Daten/Daten SIFI Labor Feb 2020')
+load("VP_labor_post")
+VP_lab <- VP_post
+
+rm(VP_post)
+
+
+# 3. We need to break down the complicated nested lists into a simple df:
+
+# 3.1 Create better codes
+
+# placeholders
+Code <- as.character() 
+Age <- as.character() 
+for (VP in VP_lab){
+  subj_Code <- c(VP[[1]]$Value[1]) # get Code of the current subject
+  Bday <- c(VP[[1]]$Value[2]) # get birthday of the current subject
+  Code <- c(Code, subj_Code) #put all Codes into a vector
+  Age <- append(Age, Bday, after = length(Age)) # same thing for the birthdays
+} 
+rm(VP, subj_Code, Bday)
+
+# Create new Codes (some participants might have the same code, but different birthdays)
+New_codes_lab <- c(paste(Code, Age, sep = "_", collapse = NULL)) 
+# Code and Birthday will be separated by a _
+rm(Code, Age)
+
+
+# Same for the online dataset:
+Code <- as.character() 
+Age <- as.character() 
+for (VP in VP_online){
+  subj_Code <- c(VP[[1]]$Value[1]) # get Code of the current subject
+  Bday <- c(VP[[1]]$Value[3]) # get birthday of the current subject
+  Code <- c(Code, subj_Code) #put all Codes into a vector
+  Age <- append(Age, Bday, after = length(Age)) # same thing for the birthdays
+} 
+rm(VP, subj_Code, Bday)
+
+# Create new Codes (some participants have the same code, but different birthdays)
+New_codes_online <- c(paste(Code, Age,sep = "_", collapse = NULL)) 
+# Code and Birthday will be separated by a _
+rm(Code, Age)
+
+
+# I don't know how I could do this without hardcoding stuff:
+# Some participants used a different code online than in the lab & told me so. 
+# Soooo: Correct the codes by hand.
+
+#wrong_codes <- c("NBU98_1998-01-26", # "NBU98_2020-01-26"
+#                 "ABA96_1996-07-27", # "KBA96_1996-07-27"
+#                 #"EVVA98_1998-09-21", # that was the guy who took drugs, excluded him
+#                 "AGE94_1994-07-26", # "AGE96_1996-07-26"
+#                 "TKI93_1993-06-17", # "DKI93_1993-06-17"
+#                 "KEHA93_1993-28.12.1993") # "EHA93_1993-12-28"
+
+#correct_codes <- c("NBU98_2020-01-26", # wrong date but who cares
+#                   "KBA96_1996-07-27",
+#                   "AGE96_1996-07-26",
+#                   "DKI93_1993-06-17", 
+#                   "EHA93_1993-12-28") 
+
+
+# Labor Codes:                 Online Codes
+# "NHA96_1996-01-21"    -->   "NHA96_1996-01-21"   # no clue what's wrong here
+# "EHA93_1993-12-28"    -->   "KEHA93_28.12.1993"
+# "DKI93_1993-06-17"    -->   "DKI93_1993-06-17"
+
+# correct stuff
+#for (i in (1:length(wrong_codes))){
+#  
+#  pos_wrong <- which(New_codes_online == wrong_codes[i])
+#  New_codes_online[pos_wrong] <- correct_codes[i]
+#}
+
+# I have no clue why this shit doesn't work so I have to do it the quick & dirty way:
+for (i in 1:length(New_codes_online)){
+  
+  if (New_codes_online[i] == "NBU98_1998-01-26"){
+    New_codes_online[i] <- "NBU98_2020-01-26"
+  } else if (New_codes_online[i] == "ABA96_1996-07-27"){
+    New_codes_online[i] <- "KBA96_1996-07-27"
+  } else if (New_codes_online[i] == "AGE94_1994-07-26"){
+    New_codes_online[i] <- "AGE96_1996-07-26"
+  } else if (New_codes_online[i] == "TKI93_1993-06-17"){
+    New_codes_online[i] <- "DKI93_1993-06-17"
+  } else if (New_codes_online[i] == "KEHA93_28.12.1993"){
+    New_codes_online[i] <- "EHA93_1993-12-28"} 
+  
+}
+
+# There are still 4 codes I can't find a match for:
+# "RNE97_1997-08-25" # excluded  
+# "EVVA98_1998-09-21"# guy who took drugs & had to be excluded 
+# "WKI91_1991-09-20" # I don't know who that is
+# "LHA92_1992-09-23" # excluded
+
+
+
+
+
+### LAB PART
+
+# 3.2 Now get the data from the SIFI and the n-back part:
+
+# create a placeholder
+SIFI_lab <- data.frame()
+Nback_lab <- data.frame()
+
+for (VP in VP_lab){
+  # SIFI: 
+  # Get RTs, labels, block names & responses for the SIFI part 
+  SIFI_subject <- VP[[3]]
+  colnames(SIFI_subject) <- c("SIFI_Label","SIFI_RT", "SIFI_Response", "Block")
+  
+  # N-back: 
+  # Get RTs, labels, block names & responses for the n-back part 
+  Nback_subject <- VP[[4]]
+  colnames(Nback_subject) <- c("Nback_Label","Nback_RT", "Nback_Response", "Nback_Block")
+  
+  # Append NA-columns for the first block (no-back), in which we don't have an n-back task
+  NA_vector <- c(rep(NA, 42)) # 42 NAs because there are 42 trials in this block
+  name_vector <- c(rep("no-back main", 42)) # 42 NAs because there are 42 trials in this block
+  noback_df <- as.data.frame(cbind(NA_vector, NA_vector, NA_vector, name_vector), stringsAsFactors = FALSE) # df with 3 NA columns
+  colnames(noback_df) <- c("Nback_Label","Nback_RT", "Nback_Response", "Nback_Block")
+  
+  # combine the dfs 
+  Nback_all <- as.data.frame(rbind(noback_df, Nback_subject), stringsAsFactors = FALSE)
+  
+  # Put everything into a df
+  SIFI_lab <- rbind(SIFI_lab, SIFI_subject, stringsAsFactors = FALSE)
+  Nback_lab <- rbind(Nback_lab, Nback_all, stringsAsFactors = FALSE)
+  
+}#FOR
+
+rm(NA_vector, SIFI_subject, Nback_subject, noback_df, name_vector)
+
+# Cbind the shit out of everything and get a big df
+lab <- as.data.frame(cbind(SIFI_lab, Nback_lab), stringsAsFactors = FALSE)
+# Append the codes
+Codes_lab <- c(rep(New_codes_lab, each = 168)) 
+lab <- as.data.frame(cbind(Codes_lab, lab))
+
+# Remove the n-back block name, because it's redundant
+lab <- lab[,1:8]
+
+
+
+### ONLINE PART
+# 3.3 Now get the data from the SIFI and the n-back part:
+
+# create a placeholder
+SIFI_online <- data.frame()
+Nback_online <- data.frame()
+
+for (VP in VP_online){
+  # SIFI: 
+  # Get RTs, labels, block names & responses for the SIFI part 
+  SIFI_subject <- VP[[3]]
+  colnames(SIFI_subject) <- c("SIFI_Label","SIFI_RT", "SIFI_Response", "Block")
+  
+  # N-back: 
+  # Get RTs, labels, block names & responses for the n-back part 
+  Nback_subject <- VP[[4]]
+  colnames(Nback_subject) <- c("Nback_Label","Nback_RT", "Nback_Response", "Nback_Block")
+  
+  # Append NA-columns for the first block (no-back), in which we don't have an n-back task
+  NA_vector <- c(rep(NA, 42)) # 42 NAs because there are 42 trials in this block
+  name_vector <- c(rep("no-back main", 42)) # 42 NAs because there are 42 trials in this block
+  noback_df <- as.data.frame(cbind(NA_vector, NA_vector, NA_vector, name_vector), stringsAsFactors = FALSE) # df with 3 NA columns
+  colnames(noback_df) <- c("Nback_Label","Nback_RT", "Nback_Response", "Nback_Block")
+  
+  # combine the dfs 
+  Nback_all <- as.data.frame(rbind(noback_df, Nback_subject), stringsAsFactors = FALSE)
+  
+  # Put everything into a df
+  SIFI_online <- rbind(SIFI_online, SIFI_subject, stringsAsFactors = FALSE)
+  Nback_online <- rbind(Nback_online, Nback_all, stringsAsFactors = FALSE)
+  
+}#FOR
+
+rm(NA_vector, SIFI_subject, Nback_subject, noback_df, name_vector)
+
+# Cbind the shit out of everything and get a big df
+online <- as.data.frame(cbind(SIFI_online, Nback_online), stringsAsFactors = FALSE)
+# Append the codes
+Codes_online <- c(rep(New_codes_online, each = 168)) 
+online <- as.data.frame(cbind(Codes_online, online))
+
+# Remove the n-back block name, because it's redundant
+online <- online[,1:8]
+
+# Append an identifier for the data
+online <- as.data.frame(cbind(online, (c(rep("online", times = length(online$Codes_online))))))
+lab <- as.data.frame(cbind(lab, (c(rep("lab", times = length(lab$Codes_lab))))))
+
+# rename columns
+colnames(online) <- c("Code","SIFI_label", "SIFI_RT", "SIFI_Response", 
+                      "Block", "N_back_Label", "N_back_RT", "N_back_Response", "Situation")
+colnames(lab) <- c("Code","SIFI_label", "SIFI_RT", "SIFI_Response", 
+                   "Block", "N_back_Label", "N_back_RT", "N_back_Response", "Situation")
+
+# Get big df with online & lab data (df N°3)
+d.full <- as.data.frame(rbind(online, lab))
+
+
+# correct a small discrepancy between the lab and online data in the n-back-part:
+# change true to TRUE and no value to FALSE 
+d.full$N_back_Response[which(d.full$N_back_Response != "")] <- TRUE
+d.full$N_back_Response[which(d.full$N_back_Response == "")] <- FALSE
+d.full$N_back_Label[which(d.full$N_back_Label == "true")] <- TRUE
+d.full$N_back_Label[which(d.full$N_back_Label == "false")] <- FALSE
+
+
+# typecast the columns
+d.full$N_back_Label<- as.logical(d.full$N_back_Label)
+d.full$N_back_Response <- as.logical(d.full$N_back_Response)
+d.full$N_back_RT <- as.numeric(d.full$N_back_RT)
+d.full$SIFI_RT <- as.numeric(d.full$SIFI_RT)
+
+
+# Compare the codes
+# --> We'd like to know which subjects participated either in the lab or online 
+#     and which subjects participated both online and offline.
+
+# Who participated only online?
+Code_only_in_Online <- setdiff(New_codes_online, New_codes_lab) 
+# 3 subjects participated only online (probably only 1 (the drugged guy), but I can't get the right codes for the other ones) 
+
+# Who participated only in the lab?
+Code_only_in_Offline <- setdiff(New_codes_lab, New_codes_online) # 24 subjects participated only in the lab
+
+# Who participated online and in the lab?
+Code_in_common <- intersect(New_codes_online, New_codes_lab) # at least 27 subjects participated online & offline
+
+# 4. Use only datasets of subjects who participated both online & in the lab (df N°4):
+df_in_com <- data.frame()
+for (i in Code_in_common){
+  subset <- subset(d.full, Code == i)
+  df_in_com <- as.data.frame(rbind(df_in_com, subset))
+}
+
+
+
+### Compute Descriptives, RTs and Perception rates
+
+# clean up a bit:
+rm(Nback_all, Nback_lab, Nback_online, SIFI_lab, SIFI_online, subset, VP, 
+   Codes_lab, Codes_online)
+
+# 5. & 6. Divide big df into a SIFI and an n-back df
+SIFI <- df_in_com[,c(1:5, 9)]  # df N°5
+NBACK <- df_in_com[,c(1,5,6,7,8,9)] # df N°6
+
+# Exclude all RTs < 100 and 
+#     SIFI-timeouts (SIFI timeout = 1700ms --> 1698 ms)
+SIFI <- subset(SIFI, SIFI_RT > 100 & SIFI_RT < 1698)
+NBACK <- subset(NBACK, N_back_RT > 100)
+
+
+
+
+
+
+#????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+# rename stuff
+
+
+
+# center the RTs
+
+# z-transform everything:
+
+# use the function scale(column, center = TRUE, scale = TRUE) to z-transforms a column - super easy!
+#install.packages("standardize")
+#library("standardize")
+
+NBACK$N_back_RT <- as.numeric(NBACK$N_back_RT)
+
+transf_RTs <- scale_by(N_back_RT~ Block + N_back_Response+ Situation + Code, data = NBACK, scale = 1)
+
+NBACK <- cbind(transf_RTs, NBACK)
+
+
+# next step: get Means (not Medians!)
+
+
+#????????????????????????????????????????????????????????????????????????????????????????????????????????
+
+
+# 7. N-BACK: Compute Accuracies & Mean RT (df N°7)
+
+
+# placeholders
+NBACK_DESCR <- data.frame() # placeholder for n-back descriptives df
+Codes <- unique(NBACK$Code) # vector with all codes
+Block <- c("no-back main", "0-back main", "1-back main", "2-back main")
+Situation <- c("online", "lab")
+
+for (c in Codes){
+  
+  # the first block (no-back) doesn't have an n-back task, so I set the first 
+  # value for each subject as NA, so the finished df has the same length as the SIFI one
+  Accuracy <- c() 
+  Reaction <- c()
+  NBACK_Mean_RT <- c()
+  Sit <- c()
+  VP <- subset(NBACK, Code == c) # have a look at each subject individually
+  
+  for (b in Block){ # have a look at each block
+    block <- subset(VP, Block == b)
+    
+    if (b == "no-back main"){ # there is no n-back task in the no-back, so I assign NAs here
+      # 2 NAs = 1 for online, 1 for lab condition
+      Accuracy <- c(Accuracy, NA, NA)
+      Sit <- c(Sit, "online", "lab")
+      NBACK_Mean_RT <- c(NBACK_Mean_RT, NA, NA)
+      
+    } else {
+      
+      for (s in Situation){ # have a look at each situation (lab and online)
+        situation <- subset(block, Situation == s)
+        
+        
+        # Compute Accuracy
+        # I'll use that d'-prime (= detection prime) stuff like in the Haatveit et al., 2010 paper
+        # d' = Z(hit rate) – Z(false alarm rate)
+        # Z = the inverse of the cumulative Gaussian distribution
+        # qnorm( x ) calculates the inverse of the cumulative Gaussian distribution (= Z)
+        
+        # if I just use the absolute number of hits (aka number of hits) in qnorm, it produces NAs. I think I need probabilities here, 
+        # so I computed the relative number of hits (hits / number of targets). Same for the false alarms. I hope that's correct.
+        
+        # hits = correctly identified targets / number of all targets
+        # false alarms = wrong responses when non-target letters were presented / number of non-targets
+        
+        hit_rate <- length(which(situation$N_back_Label == TRUE & situation$N_back_Response == TRUE)) / length(which(situation$N_back_Label == TRUE))
+        false_alarm_rate <- length(which(situation$N_back_Label == FALSE & situation$N_back_Response == TRUE)) / length(which(situation$N_back_Label == FALSE))
+        
+        
+        
+        # the next function (qnorm()) is a bit annoying and produces Infs or -Infs if
+        # we have extreme values (0 or 100 % rates)
+        
+        if (hit_rate == 1){
+          hit_rate <- .9999
+        } else if (hit_rate == 0){
+          hit_rate <- .0001 
+        }
+        
+        print(hit_rate)
+        
+        if (false_alarm_rate == 1){
+          false_alarm_rate <- .9999
+        } else if (false_alarm_rate == 0){
+          false_alarm_rate <- .0001 
+        }
+        
+        #print(false_alarm_rate)
+        
+        Acc <-  qnorm(hit_rate) - qnorm(false_alarm_rate)  
+        
+        
+        # Problem with qnorm if you don't correct 0s and 1s: 
+        # If the hit rate was 100%, it produces an "Inf"
+        # If the hit rate was 0%, it produces a "-Inf"
+        # If you subtract Inf from Inf, it produces an NaN
+        # If the hit rate was 100% and the false alarm rate was 100%, too (someone always reacted), it produces an NaN
+        # If the hit rate was 0% and the the false alarm rate was 0% (someone didn't react at all), it produces an NaN as well
+        # The smaller the hit rate, the smaller the value (converges --> -Inf I guess) 
+        
+        # put the value into a vector
+        Accuracy <- c(Accuracy, Acc)
+        
+        # get the situation name
+        Sit <- c(Sit, s)
+        
+        # Compute mean RT in all trials where the subject reacted
+        Reaction <- as.numeric(mean(subset(situation, N_back_Response == TRUE)$transf_RTs), na.rm = T)
+        # put the value into a vector
+        NBACK_Mean_RT <- c(NBACK_Mean_RT, Reaction)
+        
+      }#FOR Situation
+    }#ELSE
+  }#FOR Blocks
+  
+  # Put values into a df
+  VP_df <- as.data.frame(cbind(NBACK_Mean_RT, 
+                               Accuracy, 
+                               Sit, c(rep(Block, each = 2)),
+                               c(rep(c, times = length(NBACK_Mean_RT)))), stringsAsFactors = F)
+  NBACK_DESCR <- rbind(NBACK_DESCR, VP_df, stringsAsFactors = F)
+  
+}#FOR Codes
+
+
+
+
+# rename some columns
+colnames(NBACK_DESCR)[2:5] <- c("dprime", "Situation", "Block", "Code")
+
+
+# ALT (aber vllt trotzdem noch hilfreich)
+# Weirde Auffälligkeiten:
+# Median liegt bei einer VP über 2000 ms, was nicht möglich ist. 
+# --> Lösung: Ich hab bei den N-back RTs nicht die zu langen RTs (auch über 2000ms, weil lab.js da doof ist) rausgenommen, weil ich sonst keine FALSEs mehr hätte, da da ja die RT immer als ca 2000ms gespeichert ist. 
+# Median ist bei einigen NA oder Timeout, Timeout wäre möglich, wenn man sehr selten reagiert hat, aber NA ist komisch
+# --> Lösung: NA ist möglich, wenn ich vorher alle trials raussortiert hab (--> zu schnelle Reaktion)
+
+# z-transform the RTs
+
+SIFI$SIFI_RT <- as.numeric(SIFI$SIFI_RT)
+
+SIFI_RT_transf <- scale_by(SIFI_RT ~ Block + Situation + Code, data = SIFI, scale = 1)
+
+SIFI <- cbind(SIFI_RT_transf, SIFI)
+
+
+# 8. SIFI: Median RTs, illusion rates, normalised illusion rates and rates of correct responses (df N°8)
+SIFI_DESCR <- data.frame() # placeholder for SIFI descriptives df
+Codes <- unique(SIFI$Code) # vector with all codes
+Block <- c("no-back main", "0-back main", "1-back main", "2-back main")
+Situation <- c("online", "lab")
+
+for (c in Codes){
+  
+  SIFI_Mean_RT <- c()
+  
+  A2V1_Ill_rate <- c() 
+  A1V2_Ill_rate <- c()
+  A2V1late_Ill_rate <- c()
+  
+  A0V2_corr_rate <- c()
+  A2V0_corr_rate <- c()
+  A0V1_corr_rate <- c()
+  A1V0_corr_rate <- c()
+  
+  A2V2_corr_rate <- c()
+  A1V1_corr_rate <- c()
+  
+  A1V1_Ill_rate <- c()
+  
+  A2V1_Ill_rate_norm <- c()
+  A1V2_Ill_rate_norm <- c()
+  A2V1late_Ill_rate_norm <- c()
+  
+  VP <- subset(SIFI, Code == c) # have a look at each subject individually
+  
+  for (b in Block){ # have a look at each block
+    block <- subset(VP, Block == b)
+    
+    for (s in Situation){ # have a look at each situation (lab and online)
+      situation <- subset(block, Situation == s)
+      
+      # Compute median RT in each block
+      Reaction <- as.numeric(mean(situation$SIFI_RT_transf), na.rm = T)
+      # put the value into a vector
+      SIFI_Mean_RT <- c(SIFI_Mean_RT, Reaction)
+      
+      # compute illusion rate in each block
+      # (= number of trials with x reported flashes / number of illusion trials)
+      # SIFI (Fission Illusion)
+      A2V1 <- length(which(situation$SIFI_label == "A2V1" & situation$SIFI_Response == 2))/ # number of perceived illusions /...
+        length(which(situation$SIFI_label == "A2V1")) # ...number of illusion trials (= 10 trials - excluded trials)
+      # Fusion Illusion
+      A1V2 <- length(which(situation$SIFI_label == "A1V2" & situation$SIFI_Response == 1))/ # number of perceived illusions /...
+        length(which(situation$SIFI_label == "A1V2")) # ...number of illusion trials (= 4 trials - excluded trials) 
+      
+      # Response Bias Check
+      A2V1late <- length(which(situation$SIFI_label == "A2V1late" & situation$SIFI_Response == 2))/ # number of perceived illusions /...
+        length(which(situation$SIFI_label == "A2V1late")) # ...number of A2V1late trials (= 4 trials - excluded trials) 
+      
+      # Get rate of correct answers
+      # Manipulation Check
+      A2V0 <- length(which(situation$SIFI_label == "A2V0" & situation$SIFI_Response == 0))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A2V0")) # ...number of A2V0 trials (= 4 trials - excluded trials) 
+      
+      A0V2 <- length(which(situation$SIFI_label == "A0V2" & situation$SIFI_Response == 2))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A0V2")) # ...number of A0V2 trials (= 4 trials - excluded trials) 
+      
+      A0V1 <- length(which(situation$SIFI_label == "A0V1" & situation$SIFI_Response == 1))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A0V1")) # ...number of A0V1 trials (= 4 trials - excluded trials) 
+      
+      A1V0 <- length(which(situation$SIFI_label == "A1V0" & situation$SIFI_Response == 0))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A1V0")) # ...number of A1V0 trials (= 4 trials - excluded trials) 
+      
+      A2V2 <- length(which(situation$SIFI_label == "A2V2" & situation$SIFI_Response == 2))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A2V2")) # ...number of A2V2 trials (= 4 trials - excluded trials) 
+      
+      A1V1 <- length(which(situation$SIFI_label == "A1V1" & situation$SIFI_Response == 1))/# number of correct answers /...
+        length(which(situation$SIFI_label == "A1V1")) # ...number of A2V2 trials (= 4 trials - excluded trials) 
+      
+      
+      
+      
+      # Get "illusion" rate in A1V1
+      A1V1_ill <- length(which(situation$SIFI_label == "A1V1" & situation$SIFI_Response == 2))/# number of "illusion" answers /...
+        length(which(situation$SIFI_label == "A1V1")) # ...number of A1V1 trials (= 4 trials - excluded trials) 
+      
+      
+      # compute normalised illusion rates
+      # (= number of trials with 2 reported flashes / illusion rate in A0V2 (for A2V1 & A2V1late) or A2V0 (for A1V2) respectively)
+      # SIFI (Fission Illusion)
+      A2V1_norm <- A2V1/ # Illusionrate in A2V1 /...
+        A0V2 # ...rate of correct answers in A0V2
+      # Fusion Illusion
+      A1V2_norm <- A1V2 / # Illusionrate in A1V2 /...
+        A0V1 # ...rate of correct answers in A0V1
+      
+      # Response Bias Check
+      A2V1late_norm <- A2V1late / #  Illusionrate in A2V1late /...
+        A0V2 # ...rate of correct answers in A0V2
+      
+      
+      # put the values into vectors
+      A2V1_Ill_rate <- c(A2V1_Ill_rate, A2V1)
+      A1V2_Ill_rate <- c(A1V2_Ill_rate, A1V2)
+      A2V1late_Ill_rate <- c(A2V1late_Ill_rate, A2V1late)
+      
+      A1V0_corr_rate <- c(A1V1_corr_rate, A1V0)
+      A2V2_corr_rate <- c(A1V1_corr_rate, A2V2)
+      A1V1_corr_rate <- c(A1V1_corr_rate, A1V1)
+      
+      A2V0_corr_rate <- c(A2V0_corr_rate, A2V0)
+      A0V2_corr_rate <- c(A0V2_corr_rate, A0V2)
+      A0V1_corr_rate <- c(A0V1_corr_rate, A0V1)
+      
+      A1V1_Ill_rate <- c(A1V1_Ill_rate, A1V1_ill)
+      
+      A2V1_Ill_rate_norm <- c(A2V1_Ill_rate_norm, A2V1_norm)
+      A1V2_Ill_rate_norm <- c(A1V2_Ill_rate_norm, A1V2_norm)
+      A2V1late_Ill_rate_norm <- c(A2V1late_Ill_rate_norm, A2V1late_norm)
+      
+    }#FOR Situation
+    
+  }#FOR Block
+  
+  # Put values into a df
+  Test_situation <- c(rep(Situation, each = length(A2V1_Ill_rate)/2))
+  VP_df <- as.data.frame(cbind(Test_situation, c(rep(c, times = length(SIFI_Mean_RT))), Block, SIFI_Mean_RT,
+                               A2V1_Ill_rate, A1V2_Ill_rate, A2V1late_Ill_rate,
+                               A2V1_Ill_rate_norm, A1V2_Ill_rate_norm, A2V1late_Ill_rate_norm,
+                               A0V2_corr_rate, A2V0_corr_rate, A0V1_corr_rate, A1V0_corr_rate, 
+                               A1V1_corr_rate, A2V2_corr_rate, A1V1_Ill_rate), stringsAsFactors = F)
+  SIFI_DESCR <- rbind(SIFI_DESCR, VP_df, stringsAsFactors = F)
+  
+}#FOR Codes
+
+
+
+
+# rename some columns
+colnames(SIFI_DESCR)[1:4] <- c("Situation", "Code","Block", "SIFI_Mean_RT")
+
+
+# The stats part is still missing but will be updated soon.
