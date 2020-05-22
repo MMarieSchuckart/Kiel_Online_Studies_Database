@@ -1,0 +1,268 @@
+# Read in CSV data for the RSE study
+
+# Script by Merle Schuckart
+# Feb 2020 Version
+
+### 1. Load the data
+setwd('/Users/merle/Desktop/Experimente/Lab.js Studien/Bachelorarbeit/MultiRace/Daten Offline')
+
+## 1.2 Get the list of files in the Directory
+file_list <- list.files(pattern='.csv')
+
+## 1.3 Loop through files to read in data
+# (This might take some time.)
+VP_data <- list() # Create placeholder for the main list
+
+for (i in 1:length(file_list)) {
+  
+  # 1.3.1. Get data for one participant
+  VP <- data.frame((read.csv(file_list[i])), stringsAsFactors = F)
+  # 1.3.2 Get information concerning the experiment (Demographics)
+  position_code <-  which(VP$sender == "Form")   
+  Demographics_Value <- as.character(VP[position_code, "id_participant"])
+  Demographics_Label <- "id_participant"
+  
+  
+  # 1.3.2.1 Find row with the demographics (for id_gender, id_birth,...)
+  position_demographics <-  which(VP$sender == "Demographics")   
+  
+  dem_start <- which(colnames(VP) == "id_birth")
+  dem_end <- which(colnames(VP) == "id_neuro")
+  
+  for (j in dem_start:dem_end) {
+    tmp <- as.character(VP[position_demographics, colnames(VP)[j] ])
+    Demographics_Value <- c(Demographics_Value, tmp)
+    Demographics_Label <- c(Demographics_Label, colnames(VP)[j])
+  }
+  
+  # age = year the data was collected - subject's year of birth
+  age <- as.numeric(substr(VP$timestamp[1],1,4))-as.numeric(substr(Demographics_Value[2],1,4))                 
+  
+  Demographics_Value <- c(Demographics_Value, age)
+  Demographics_Label <- c(Demographics_Label, "id_age")
+  
+  
+  # 1.3.2.2 Combine Demographics to Data Frame and Clean up
+  Demographics <- data.frame("Label" = Demographics_Label,
+                             "Value" = Demographics_Value, stringsAsFactors = F)  
+  Demographics[Demographics ==""] <- NA
+  Demographics <- na.omit(Demographics)
+  
+  
+  # 1.3.3. Get information concerning the experiment (Feedback)
+  Feedback_Value <- NULL
+  Feedback_Label <- NULL
+  
+  
+  # 1.3.2.1 Find Row with the feedback
+  position_feedback <-  which(VP$sender == "last questions") 
+  
+  exp_start <- which(colnames(VP) == "exp_auditory")
+  exp_end <- which(colnames(VP) == "exp_visual")
+  for (j in exp_start:exp_end) {
+    tmp <- as.character(VP[position_feedback, colnames(VP)[j] ])
+    Feedback_Value <- c(Feedback_Value, tmp)
+    Feedback_Label <- c(Feedback_Label, colnames(VP)[j])
+  }
+  
+  Feedback <- data.frame("Label" = Feedback_Label,
+                         "Value" = Feedback_Value, stringsAsFactors = F)
+  
+  
+  # 1.3.4. Get the Data
+  # 1.3.4.1 Change Event-IDs to Numeric
+  VP$sender_id <- as.numeric(sub("_.*", "", VP$sender_id))
+  
+  # 1.3.4.2 List and find the rows with the names of the blocks
+  #row_names <- c("1. Block (Trial), 18 Stimuli", "2. Block, 90 Stimuli", 
+  #                "3. Block, 90 Stimuli", "4. Block, 90 Stimuli")
+  
+  row_names <- c("2. Block, 90 Stimuli", "3. Block, 90 Stimuli", 
+                 "4. Block, 90 Stimuli") # Excluding Trainings
+  
+  # get list with all positions of the blocks
+  pos <- list()
+  for (k in 1:length(row_names)) {	
+    pos[k] <- which(VP$sender == row_names[k]) 
+  }
+  
+  
+  # 1.3.4.3 Find the Event ID Indicating the Block Onset
+  block_onset <- list()
+  for (k in 1:length(pos)) {
+    block_onset[k] <- as.numeric(VP[as.numeric(pos[k]), "sender_id"])
+  }
+  
+  
+  # 1.3.4.4 Loop through the data to find the single blocks
+  MultiRace <- data.frame()
+  for (l in 1:length(block_onset)) {
+    tmppos <- which((VP$sender == "reaction") & (VP$sender_id == block_onset[l])) 
+    #& (VP$ended_on == "response")) # I could use this one to filter the responses
+    
+    Label <- as.factor(VP[tmppos, "label"])
+    Value <- as.numeric(VP[tmppos, "duration"])
+    Block <- as.factor(row_names[l])
+    
+    tmp_frame <-  data.frame("Label" = Label,
+                             "Value" = Value, 
+                             "Block" = Block,
+                             stringsAsFactors = F)
+    
+    # And Add to big list
+    MultiRace <- rbind(MultiRace, tmp_frame)
+  } 
+  
+  
+  # 1.3.5. Put lists into list:
+  tmplist <- list(Demographics, Feedback, MultiRace)
+  VP_data[i] <- list(tmplist)
+  names(VP_data)[i] <- paste0("VP_", as.character(i))
+  
+} 
+
+
+
+
+
+
+
+### 2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_data, file='VP_data')
+
+
+### 3. Preprocessing: Clean the dataset
+VP_data_1 <- VP_data # Save from harm :-)
+
+## 3.1 Exclude datasets of participants with poor eyesight, impaired hearing, etc.
+
+# Criteria for exclusion: Remove if...  
+# ... id_eyesight, id_hearing, id_neuro, id_drugs and exp_delay is "yes"
+# ... exp_auditory and exp_visual is "no"
+
+
+VP_clean <- list() # Placeholder for the cleaned datasets
+
+# 3.1.2 Impaired Demographics
+dem_sel <- c("id_drugs","id_eyesight","id_hearing","id_neuro")
+
+# VP-Loop
+for(i in 1:length(VP_data)) { 
+  # Selection-Loop
+  for (j in 1:length(dem_sel)) {
+    tmppos <- which(VP_data$VP_1[[1]]$Label == dem_sel[j])
+    
+    VP <- VP_data[[i]] 
+    
+    if (VP[[1]]$Value[[tmppos]] == "yes"){  
+      VP <-  NA 
+      VP_clean[[i]] <- VP
+      
+    } else {
+      VP_clean[[i]] <- VP_data[[i]]
+      names(VP_clean)[i] <- paste0("VP_", as.character(i))
+    } # IF	
+  } # Selection
+} # VP
+
+
+#	# 3.1.3 Impaired Experiment
+#	exp_sel <- c("exp_delay","exp_auditory","exp_visual")
+#	exp_pass <- c("no","yes","yes") # Which values are OK to let pass?
+#	# These could also be negative statements -> which values to exclude
+#
+#	# VP-Loop
+#	for(i in 1:length(VP_data)) { 
+#		# Selection-Loop
+#		for (j in 1:length(exp_sel)) {
+#			tmppos <- which(VP_data$VP_1[[2]]$Label == exp_sel[j])
+#			
+#			VP <- VP_data[[i]]
+#			
+#			if (is.null(VP[[2]]$Value[[tmppos]])) { 
+#   			VP[[2]]$Value[[tmppos]] <- NA 
+#  			VP <-  NA 
+# 			VP_clean[[i]] <- VP        
+#  			
+#  			} else if (VP[[2]]$Value[[tmppos]] != exp_pass[j]){  
+#    			VP <-  NA 
+#    			VP_clean[[i]] <- VP
+#  			
+#  			} else {
+#    		next()
+#  			} # IF
+#		} # Selection
+#  	}  # VP
+
+
+# 3.1.4 Remove NAs
+if (length(which(is.na(VP_clean))) != 0){
+  VP_clean <- VP_clean[-which(is.na(VP_clean))]
+}
+
+### 3.2. Save data if you want to
+# Write data back to disk in RDA format.
+#save(VP_clean, file='VP_clean')
+
+#__________________________________________________
+# Prepare dfs for the stats part:
+
+# We need simpler dfs + a df with the timing precision
+
+# 4. Simplify VP_clean & merge Codes and Birthdays for better identification
+
+rm(list=setdiff(ls(), "VP_clean")) #remove everything except for VP_clean
+
+# 4.1 Codes
+
+# placeholders
+Code <- as.character() 
+Age <- as.character() 
+
+for (VP in VP_clean){
+  
+  subj_Code <- c(VP[[1]]$Value[1]) # get Code of the current subject
+  Bday <- c(VP[[1]]$Value[2]) # get birthday of the current subject
+  
+  Code <- c(Code, subj_Code) #put all Codes into a vector
+  Age <- append(Age, Bday, after = length(Age)) # same thing for the birthdays
+  
+} 
+rm(VP, subj_Code, Bday)
+
+# Create new Codes (some participants have the same code, but different birthdays)
+New_codes_offline <- c(paste(Code, Age, 
+                                        sep = "_", collapse = NULL)) 
+# Code and Birthday will be separated by a _
+rm(Code, Age)
+
+
+# 4.2 Now the RTs, conditions and blocks:
+
+# create a placeholder
+RTs_all <- data.frame()
+
+for (VP in VP_clean){
+  
+  # Get reaction times 
+  RTs_subject <- VP[[3]]
+  RTs_all <- rbind(RTs_all, RTs_subject)
+  
+}
+rm(VP, RTs_subject)
+
+
+# 4.3 Combine Codes and the small df
+
+# First we need a Code as an identifier for each row in RTs_all:
+Codes <- c(rep(New_codes_offline, 
+               each = length(RTs_all$Label)/length(VP_clean)))
+
+# Combine the df and the Codes
+df_Offline <- as.data.frame(cbind(Codes, RTs_all))
+rm(Codes, New_codes_offline, RTs_all)
+
+# save the df:
+#setwd('/Users/merle/Desktop/Experimente/Lab.js Studien/Bachelorarbeit/MultiRace')
+#write.csv(df_Offline, file = "df_Offline.csv")
