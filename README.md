@@ -19,8 +19,7 @@ Here, you can find experimental and analysis scripts for the following studies:
   - Block 3: 1-back + SIFI (42 trials --> 10 Illusion trials)
   - Block 4: 2-back + SIFI (42 trials --> 10 Illusion trials)
       --> There's a short training block before each main block     
-- Experimental scripts (lab.js):
-
+- Experimental script for the online part (as a lab.js file; you can easily turn this into a lab study, too): https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/SIFI_nback/exp_online
       - for the online study: https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/SIFI_nback/Read_SQLite_online
       - for the lab study: 
       https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/SIFI_nback/Read_CSV_lab
