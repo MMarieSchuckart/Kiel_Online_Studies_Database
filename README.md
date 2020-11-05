@@ -5,11 +5,15 @@ This is a database for online studies conducted at the Institute for Psychology 
 Here, you can find experimental and analysis scripts for the following studies:<br>
 
 
-<h3>Pilot Study: Risk Assessment</h3>
-- Participants were asked to write down a dilemma scenario with 2 options for action and to rate the risk of each option.<br>
-- Experimental script (lab.js):<br>
-- Analysis script (R): <br> https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk_pilot/pilot1_Read_SQlite
-
+<h3>German Everyday Risk Inventory (GERI)</h3>
+- Pilot study: Participants were asked to write down a dilemma scenario with 2 options for action and to rate the risk of each option.
+- Based on the dilemmata from the pilot study, the "German Everyday Risk Inventory" (GERI) was created:
+https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk_pilot/German%20Everyday%20Risk%20Inventory_english.pdf 
+- Experimental script (lab.js) for the risk inventory in English language:<br>
+https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk_pilot/ratingsurvey_english_5.json
+- Analysis script (R) for the pilot study: <br>
+https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk_pilot/pilot1_Read_SQlite
+<br>
 
 <h3>Redundant Signals Effect</h3>
 - replication of the RSE (Todd, 1912): shorter reaction times when responding to multisensory (here: audiovisual) compared to unisensory stimuli (here: visual and auditory)<br>
