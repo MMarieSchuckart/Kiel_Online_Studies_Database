@@ -18,7 +18,7 @@ https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/risk
 <h3>Redundant Signals Effect</h3>
 - replication of the RSE (Todd, 1912): shorter reaction times when responding to multisensory (here: audiovisual) compared to unisensory stimuli (here: visual and auditory)<br>
 - 1 training block, 3 main blocks with 90 trials each<br>
-- Experimental script (lab.js):<br> 
+- Experimental script (lab.js): will be uploaded soon <br> 
 - Analysis scripts (R):  
       - for the lab study:<br> 
 https://github.com/MMarieSchuckart/Kiel_Online_Studies_Database/blob/master/RSE/Read_CSV_lab <br> 
